@@ -4,10 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PDTIII手机版">
 <title>生产实时看板 · 手机版</title>
-<link rel="icon" href="data:,">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --border: #2d333b;
@@ -617,17 +621,10 @@
   }
   function lineOf(name){ var nm=normName(name); for (var i=0;i<state.lines.length;i++){ if (normName(state.lines[i].name)===nm) return state.lines[i]; } return null; }
   function hourlyKeyOf(name){ var nm=normName(name), hk=state.hourly||{}; for (var k in hk){ if (normName(k)===nm) return k; } return name; }
-  // ≤t 最近累计值: 采样 → hourly桶线性插值(跨换班斜率外推) → 实时lines (同桌面 valueAt, 去采样即兜底链)
+  // ≤t 最近累计值: hourly桶线性插值(跨换班斜率外推) → 0 (★ 2026-09-03 v6.3 去浏览器采样:
+  //   旧版优先读浏览器 localStorage 采样(sampStore) → 各手机采样集不同 → 同一数据不同图。
+  //   现一律只认 state.hourly (Firebase 同一份快照), 无桶返回 0 不拿 lines 整日值冒充)
   function hValueAt(name, t, usePlan, dayOff){
-    var tMs = bkkDay0() + (t + (dayOff||0)*1440)*60000;
-    var arr = (loadSamps())[name] || [];
-    var best = null, qKey = sampShiftKey(tMs);
-    for (var i=0;i<arr.length;i++){
-      if (arr[i].ts > tMs) break;
-      if (sampShiftKey(arr[i].ts) !== qKey) continue;
-      if (usePlan){ if (arr[i].p != null) best = arr[i].p; } else { best = arr[i].a; }
-    }
-    if (best != null) return best;
     var snaps = (state.hourly||{})[hourlyKeyOf(name)] || [];
     if (snaps.length){
       var pts = [];
@@ -650,23 +647,17 @@
       if (lo) return lo.v;
       if (hi){ var nx2=hiN||hi; var sl2=(nx2.m>hi.m)?(nx2.v-hi.v)/(nx2.m-hi.m):0; return Math.max(0, hi.v-(hi.m-tAbs)*sl2); }
     }
-    var L = lineOf(name);
-    if (L) return usePlan ? (Number(L.plan)||0) : (Number(L.actual)||0);
+    // ★ v6.3: 无 hourly 桶 → 返回 0 (不拿 lines 整日值冒充, 由调用方 segHasData/纯色兜底处理)
     return 0;
   }
   // ★ 段级数据可信检查: hourly 桶每天 0 点清空 → 凌晨看夜班图时, 昨晚 20:30-24:00 前半夜段
   //   在当天桶/采样里无覆盖 → 差分会拿 8:00 后桶当 lo 出垃圾值。有覆盖才画 (live 段免检, 用实时值)
+  // ★ v6.3: 只认 hourly 桶覆盖, 不再把浏览器采样当可信源
   function segHasData(name, t0, t1, off){
     var snaps = (state.hourly||{})[hourlyKeyOf(name)] || [];
     var t0A = (off===-1 && t0>=1440) ? t0-1440 : t0;
     var t1A = (off===-1 && t1>=1440) ? t1-1440 : t1;
     for (var i=0;i<snaps.length;i++){ var m = snapMins(snaps[i]); if (m>=t0A-13 && m<=t1A+13) return true; }
-    var arr = (loadSamps())[name] || [];
-    if (arr.length){ // 共享采样覆盖 (电脑大屏积累的昨晚采样也算可信源)
-      var ms0 = bkkDay0() + (t0 + (off||0)*1440)*60000;
-      var ms1 = bkkDay0() + (t1 + (off||0)*1440)*60000;
-      for (var j=0;j<arr.length;j++){ if (arr[j].ts>=ms0-90000 && arr[j].ts<=ms1+90000) return true; }
-    }
     return false;
   }
   // 本班次已开始段: 每段产量 = 段末累计 − 段初累计 (开班首段从0; 跨换班清零差分<0 → 取段末值)
@@ -873,7 +864,7 @@
         state.source = d.source || "";
         state.mode = d.mode || "";
         setConn(true);
-        sampleNow();
+        // sampleNow(); // ★ v6.3 停用: 浏览器采样不再参与小时图分段(见 hValueAt/segHasData)
         render();
       } else {
         setConn(false);
@@ -917,6 +908,12 @@
     if (!document.hidden) refreshAll();
   });
 })();
+</script>
+<!-- ★ 2026-09-03 PWA: 添加到主屏幕后全屏独立运行; SW 网络优先, 不缓存 Firebase 数据/live-data.js -->
+<script>
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('./sw.js').catch(function () {});
+}
 </script>
 </body>
 </html>
