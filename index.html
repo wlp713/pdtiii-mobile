@@ -121,6 +121,19 @@
   svg { display:block; width:100%; height:auto; }
   .chart-empty { color:var(--gray); font-size:12px; text-align:center; padding:22px 0; }
 
+  /* ── 小时产出 ── */
+  .hc-legend { display:flex; align-items:center; gap:14px; font-size:10.5px; font-weight:700; color:var(--gray); margin:0 2px 4px; }
+  .hc-legend .dot { width:8px; height:8px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:-1px; }
+  .lg-act .dot { background:#58a6ff; } .lg-pln .dot { background:#d29922; }
+  .hc-rate { margin-left:auto; color:var(--gray); font-size:10.5px; font-weight:700; }
+  .hc-rate b { font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; }
+  .hc-rate.good b { color:var(--green); } .hc-rate.warn b { color:var(--orange); } .hc-rate.bad b { color:var(--red); }
+  .hc-detail { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; font-size:11px; color:var(--gray); margin:6px 2px 0; min-height:15px; }
+  .hd-seg { color:var(--white); font-weight:800; }
+  .hd-v { color:#c9d1d9; font-weight:700; font-variant-numeric:tabular-nums; }
+  .hd-ok { color:var(--green); font-weight:700; } .hd-warn { color:var(--orange); font-weight:700; } .hd-bad { color:var(--red); font-weight:700; }
+  .hc-hint { font-size:9px; color:#6e7681; margin:4px 2px 0; line-height:1.6; }
+
   /* ── 页脚 ── */
   footer { text-align:center; color:var(--gray); font-size:10.5px; margin-top:16px; line-height:1.8; }
   .refresh-btn {
@@ -171,6 +184,17 @@
     <div id="fhBody"></div>
   </div>
 
+  <div class="sec" id="hourlySec" style="display:none">
+    <div class="sec-h">📊 小时产出 <span class="tag" id="hourlyTag">-</span></div>
+    <div class="chips" id="hourlyChips"></div>
+    <div class="chart-box">
+      <div class="hc-legend" id="hourlyLegend"></div>
+      <div id="hourlyChart"></div>
+      <div class="hc-detail" id="hourlyDetail"></div>
+      <div class="hc-hint" id="hourlyHint"></div>
+    </div>
+  </div>
+
   <div class="sec" id="attSec" style="display:none">
     <div class="sec-h">👥 出勤率 <span class="tag" id="attTag"></span></div>
     <div id="attBody"></div>
@@ -213,7 +237,7 @@
   var DATA_URL = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii.json";
   var ATT_URL  = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii_att.json";
 
-  var state = { lines: [], updatedAt: null };
+  var state = { lines: [], updatedAt: null, hourly: {} };
 
   function $(id){ return document.getElementById(id); }
   function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
@@ -254,6 +278,7 @@
     renderStall(lines);
     renderProblems();
     renderFirstHour();
+    renderHourly();
     renderAttendance();
     renderTrend();
     updText();
@@ -455,10 +480,245 @@
       + dots + labels + '</svg>';
   }
 
+  /* ── 小时产出 · 本班次逐段图 (口径同电脑端 pdtiii-live v5.42: 泰国GMT+7时钟 + 共享采样 + hourly桶) ── */
+  var BKK_OFF = 7*3600*1000;
+  function bkkC(ts){ return new Date((ts==null?Date.now():ts)+BKK_OFF); }
+  function bkkMin(ts){ var u=bkkC(ts); return u.getUTCHours()*60+u.getUTCMinutes(); }
+  function bkkDay0(ts){ var u=bkkC(ts); return Date.UTC(u.getUTCFullYear(),u.getUTCMonth(),u.getUTCDate())-BKK_OFF; }
+  function bkkParts(ts){ var u=bkkC(ts); return { y:u.getUTCFullYear(), M:u.getUTCMonth()+1, D:u.getUTCDate(), hh:("0"+u.getUTCHours()).slice(-2), mm:("0"+u.getUTCMinutes()).slice(-2), mins:u.getUTCHours()*60+u.getUTCMinutes() }; }
+  var DAY_END = 20*60+20, NIGHT_START = 20*60+30, NIGHT_END = 8*60;
+  // 休息/午休已剔除: 白班 [8:00,20:20) 11段; 夜班 [20:30,次日7:50] 10段 (22:30-22:40/00:30-01:30/07:50-08:00不计)
+  var DAY_SEGS = [[480,540],[540,600],[610,660],[660,720],[780,840],[840,900],[910,960],[960,1020],[1040,1100],[1100,1160],[1160,1220]];
+  var NIGHT_SEGS = [[1230,1290],[1290,1350],[1360,1410],[1410,1470],[1530,1590],[1590,1650],[1650,1710],[1710,1770],[1770,1830],[1830,1910]];
+  function segFor(mins){
+    if (mins>=8*60 && mins<NIGHT_START){
+      for (var i=DAY_SEGS.length-1;i>=0;i--){ if (mins>=DAY_SEGS[i][0]) return {shift:"day",idx:i+1,t0:DAY_SEGS[i][0],t1:DAY_SEGS[i][1]}; }
+      return null;
+    }
+    var ref=(mins>=NIGHT_START)?mins:mins+24*60;
+    if (ref<NIGHT_START||ref>=NIGHT_END+24*60) return null;
+    for (var j=NIGHT_SEGS.length-1;j>=0;j--){ if (ref>=NIGHT_SEGS[j][0]) return {shift:"night",idx:j+1,t0:NIGHT_SEGS[j][0],t1:NIGHT_SEGS[j][1]}; }
+    return null;
+  }
+  function shiftSegAt(mins){ var s=segFor(mins); if (s) return s; return {shift:"day",idx:1,t0:8*60,t1:DAY_SEGS[0][1]}; }
+  function fmtSegMin(m){ var x=((m%1440)+1440)%1440; return ("0"+Math.floor(x/60)).slice(-2)+":"+("0"+(x%60)).slice(-2); }
+  // 快照桶 h 解析: 后端 sync_db 存 HHMM 转 int (前导零丢失: 00:10→10, 08:10→810)
+  //   h>=100 → HHMM (前2-3位=时, 后2位=分); h<100 只可能是 00:xx 凌晨桶 → 分钟即自身
+  function snapMins(sn){
+    var raw = String(sn.h || "").trim();
+    if (!raw) return 0;
+    if (raw.length >= 3){
+      var hh = parseInt(raw.slice(0, raw.length-2), 10) || 0;
+      var mm = parseInt(raw.slice(-2), 10) || 0;
+      return hh*60 + mm;
+    }
+    return Number(raw) || 0;  // 00:00-00:59 的桶 (h=10 → 0:10=10分钟)
+  }
+  // ★ 前端采样(增强, 非必需): 手机自身打开期间每 60s 记主要 8 线累计 {ts,a,p}, 48h 清理。
+  //   localStorage 按设备隔离 — 手机与电脑端不共享, 不依赖任何外部设备常开;
+  //   凌晨看夜班图时, 昨晚 20:30-24:00 前半夜段无当天桶(云端每日清空) → 需手机昨晚开着才自补,
+  //   否则由 segHasData 诚实跳过, 只画当天 0 点后有云端桶的后半夜段。
+  var SAMP_KEY = "pdtiii_samps_v1";
+  var sampStore = null;
+  function loadSamps(){
+    if (sampStore) return sampStore;
+    try { sampStore = JSON.parse(localStorage.getItem(SAMP_KEY) || "{}") || {}; } catch(e){ sampStore = {}; }
+    return sampStore;
+  }
+  function saveSamps(){ try { localStorage.setItem(SAMP_KEY, JSON.stringify(sampStore)); } catch(e){ /* ignore */ } }
+  function sampDay(ts){ var d0=bkkDay0(ts); if (bkkMin(ts)<8*60) d0-=24*3600*1000; return d0; } // 泰国0-8点归前一天晚班
+  function sampleNow(){
+    try {
+      var now = Date.now(), store = loadSamps();
+      state.lines.forEach(function(l){
+        if (!MAIN_SET[normName(l.name)]) return;
+        var arr = store[l.name] || (store[l.name] = []);
+        var last = arr[arr.length-1];
+        if (last && now-last.ts < 60000) return;
+        arr.push({ ts:now, a:Number(l.actual)||0, p:Number(l.plan)||0 });
+        var cut = now - 48*3600*1000;
+        while (arr.length && arr[0].ts < cut) arr.shift();
+      });
+      saveSamps();
+    } catch(e){ /* ignore */ }
+  }
+  function lineOf(name){ var nm=normName(name); for (var i=0;i<state.lines.length;i++){ if (normName(state.lines[i].name)===nm) return state.lines[i]; } return null; }
+  function hourlyKeyOf(name){ var nm=normName(name), hk=state.hourly||{}; for (var k in hk){ if (normName(k)===nm) return k; } return name; }
+  // ≤t 最近累计值: 采样 → hourly桶线性插值(跨换班斜率外推) → 实时lines (同桌面 valueAt, 去采样即兜底链)
+  function hValueAt(name, t, usePlan, dayOff){
+    var tMs = bkkDay0() + (t + (dayOff||0)*1440)*60000;
+    var arr = (loadSamps())[name] || [];
+    var best = null, qDay = sampDay(tMs);
+    for (var i=0;i<arr.length;i++){
+      if (arr[i].ts > tMs) break;
+      if (sampDay(arr[i].ts) !== qDay) continue;
+      if (usePlan){ if (arr[i].p != null) best = arr[i].p; } else { best = arr[i].a; }
+    }
+    if (best != null) return best;
+    var snaps = (state.hourly||{})[hourlyKeyOf(name)] || [];
+    if (snaps.length){
+      var pts = [];
+      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; pts.push({ m:snapMins(sn), v:usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0) }); }
+      pts.sort(function(a,b){ return a.m-b.m; });
+      var tAbs = (dayOff===-1 && t>=1440) ? t-1440 : t;
+      var lo=null, hi=null, hiN=null;
+      for (var k=0;k<pts.length;k++){
+        if (pts[k].m<=tAbs) lo=pts[k];
+        else { if (!hi) hi=pts[k]; else { hiN=pts[k]; break; } }
+      }
+      if (lo && hi){
+        if (hi.v < lo.v*0.5){ // 换班清零 → 用换班后斜率外推回 t
+          var nx = hiN || pts[pts.length-1];
+          var sl = (nx && nx.m>hi.m) ? (nx.v-hi.v)/(nx.m-hi.m) : 0;
+          return Math.max(0, hi.v - (hi.m-tAbs)*sl);
+        }
+        return lo.v + (hi.v-lo.v)*(tAbs-lo.m)/(hi.m-lo.m);
+      }
+      if (lo) return lo.v;
+      if (hi){ var nx2=hiN||hi; var sl2=(nx2.m>hi.m)?(nx2.v-hi.v)/(nx2.m-hi.m):0; return Math.max(0, hi.v-(hi.m-tAbs)*sl2); }
+    }
+    var L = lineOf(name);
+    if (L) return usePlan ? (Number(L.plan)||0) : (Number(L.actual)||0);
+    return 0;
+  }
+  // ★ 段级数据可信检查: hourly 桶每天 0 点清空 → 凌晨看夜班图时, 昨晚 20:30-24:00 前半夜段
+  //   在当天桶/采样里无覆盖 → 差分会拿 8:00 后桶当 lo 出垃圾值。有覆盖才画 (live 段免检, 用实时值)
+  function segHasData(name, t0, t1, off){
+    var snaps = (state.hourly||{})[hourlyKeyOf(name)] || [];
+    var t0A = (off===-1 && t0>=1440) ? t0-1440 : t0;
+    var t1A = (off===-1 && t1>=1440) ? t1-1440 : t1;
+    for (var i=0;i<snaps.length;i++){ var m = snapMins(snaps[i]); if (m>=t0A-13 && m<=t1A+13) return true; }
+    var arr = (loadSamps())[name] || [];
+    if (arr.length){ // 共享采样覆盖 (电脑大屏积累的昨晚采样也算可信源)
+      var ms0 = bkkDay0() + (t0 + (off||0)*1440)*60000;
+      var ms1 = bkkDay0() + (t1 + (off||0)*1440)*60000;
+      for (var j=0;j<arr.length;j++){ if (arr[j].ts>=ms0-90000 && arr[j].ts<=ms1+90000) return true; }
+    }
+    return false;
+  }
+  // 本班次已开始段: 每段产量 = 段末累计 − 段初累计 (开班首段从0; 跨换班清零差分<0 → 取段末值)
+  function segsOfHour(name, curActual, curPlan){
+    var nowMins = bkkMin();
+    var sc = shiftSegAt(nowMins);
+    var segs = [], isNight = sc.shift === "night";
+    var table = isNight ? NIGHT_SEGS : DAY_SEGS;
+    var endCap = isNight ? NIGHT_END+24*60 : DAY_END;
+    var postMid = isNight && nowMins < NIGHT_END;   // 凌晨0-8点属夜班次日
+    var cmpMins = postMid ? nowMins+24*60 : nowMins;
+    for (var k2=0;k2<table.length;k2++){
+      var t0=table[k2][0], t1=table[k2][1];
+      if (t0 >= cmpMins || t0 >= endCap) break;
+      var first = (k2===0), off = postMid ? -1 : 0;
+      var live = (t1 > cmpMins);
+      if (!live && !segHasData(name, t0, t1, off)) continue; // 无当天数据的前半夜段不画, 避免垃圾值
+      var a0 = first ? 0 : hValueAt(name, t0, false, off);
+      var a1 = (t1 > cmpMins) ? (Number(curActual)||0) : hValueAt(name, t1, false, off);
+      var p0 = first ? 0 : hValueAt(name, t0, true, off);
+      var p1 = (t1 > cmpMins) ? (Number(curPlan)||0) : hValueAt(name, t1, true, off);
+      var actual = a1-a0, plan = p1-p0;
+      if (actual < 0) actual = a1;
+      if (plan < 0) plan = p1;
+      segs.push({ h:t1/60, lab:k2+1, live:live, actual:Math.max(0,actual), plan:Math.max(0,plan), t0:t0, t1:t1 });
+    }
+    return segs;
+  }
+  var hSelName = null;
+  function hourMains(){
+    var out = [];
+    MAIN_LINES.forEach(function(n){ var l = lineOf(n); if (l) out.push(l); });
+    return out;
+  }
+  function renderHourly(){
+    var sec = $("hourlySec");
+    if (!sec) return;
+    var mains = hourMains();
+    if (!mains.length){ sec.style.display = "none"; return; }
+    sec.style.display = "block";
+    if (!hSelName || !mains.some(function(l){ return l.name===hSelName; })) hSelName = mains[0].name;
+    var chipBox = $("hourlyChips");
+    chipBox.innerHTML = mains.map(function(l){
+      return '<span class="chip' + (l.name===hSelName ? " on" : "") + '" data-hl="' + esc(l.name) + '">' + esc(shortName(l.name)) + '</span>';
+    }).join("");
+    Array.prototype.forEach.call(chipBox.querySelectorAll(".chip"), function(c){
+      c.addEventListener("click", function(){ hSelName = c.getAttribute("data-hl"); renderHourly(); });
+    });
+    drawHourly();
+  }
+  function drawHourly(){
+    var sec = $("hourlySec");
+    if (!sec || sec.style.display==="none" || !hSelName) return;
+    var cur = lineOf(hSelName);
+    var curActual = cur ? (Number(cur.actual)||0) : 0;
+    var curPlan = cur ? (Number(cur.plan)||0) : 0;
+    var segs = segsOfHour(hSelName, curActual, curPlan);
+    var sc = shiftSegAt(bkkMin());
+    var night = sc.shift === "night";
+    $("hourlyTag").textContent = (night?T("夜班","Night"):T("白班","Day")) + " · " + T("段","Seg ") + sc.idx;
+    var rateTxt = "";
+    if (curPlan > 0){
+      var rr = curActual/curPlan*100;
+      rateTxt = '<span class="hc-rate ' + (rr>=90?"good":(rr>=70?"warn":"bad")) + '">' + T("当班产量达成","Rate ") + '<b>' + rr.toFixed(0) + '%</b></span>';
+    }
+    $("hourlyLegend").innerHTML = '<span class="lg-act"><i class="dot"></i>' + T("实际","Act") + '</span><span class="lg-pln"><i class="dot"></i>' + T("目标","Plan") + '</span>' + rateTxt;
+    $("hourlyHint").textContent = zh ? (night
+      ? "夜班休息不计时段: 22:30-22:40 · 00:30-01:30 · 次日 07:50-08:00 交班"
+      : "休息不计时段: 10:00-10:10 · 12:00-13:00 午休 · 15:00-15:10 · 17:00-17:20 · 20:20-20:30 交班") : "";
+    var box = $("hourlyChart");
+    if (!segs.length){
+      box.innerHTML = '<div class="chart-empty">' + T("暂无进行中时段 (休息/交班)","No active segment") + '</div>';
+      $("hourlyDetail").innerHTML = "";
+      return;
+    }
+    var dv = segs[segs.length-1];
+    var dRate = dv.plan>0 ? dv.actual/dv.plan*100 : NaN;
+    var dCls = isNaN(dRate) ? "" : (dRate>=90?"hd-ok":(dRate>=70?"hd-warn":"hd-bad"));
+    $("hourlyDetail").innerHTML =
+      '<span class="hd-seg">' + T("段","Seg ") + dv.lab + ' ' + fmtSegMin(dv.t0) + '-' + fmtSegMin(dv.t1) + (dv.live ? ' · ' + T("进行中","live") : "") + '</span>'
+      + '<span>' + T("实际","Act") + ' <span class="hd-v">' + fmt(Math.round(dv.actual)) + '</span></span>'
+      + '<span>' + T("目标","Plan") + ' <span class="hd-v">' + fmt(Math.round(dv.plan)) + '</span></span>'
+      + (isNaN(dRate) ? "" : '<span class="' + dCls + '">' + T("达成","") + ' ' + dRate.toFixed(0) + '%</span>');
+    // ── SVG 双柱图: 每时段 = 实际柱(左, 蓝/达成绿) + 目标柱(右, 橙), 柱顶标实际值, 底部时段起点时间 ──
+    var W=344, H=158, padL=36, padR=6, padT=20, padB=18;
+    var iw=W-padL-padR, ih=H-padT-padB;
+    var n=segs.length, slot=iw/n;
+    var maxV=0;
+    segs.forEach(function(s){ maxV=Math.max(maxV, s.actual, s.plan); });
+    if (maxV<=0) maxV=10;
+    maxV = Math.ceil(maxV/50)*50;
+    var s2 = '<line x1="'+padL+'" y1="'+padT+'" x2="'+(W-padR)+'" y2="'+padT+'" stroke="#21262d" stroke-width="1"/>'
+      + '<text x="'+(padL-5)+'" y="'+(padT+3)+'" text-anchor="end" font-size="7.5" fill="#8b949e">'+maxV+'</text>'
+      + '<line x1="'+padL+'" y1="'+(padT+ih)+'" x2="'+(W-padR)+'" y2="'+(padT+ih)+'" stroke="#30363d" stroke-width="1"/>';
+    var bw = Math.max(5, Math.min(13, slot*0.3));
+    var gap = 4;
+    segs.forEach(function(s, idx){
+      var cx = padL + slot*idx + slot/2;
+      var xa = cx - bw - gap/2, xp = cx + gap/2;
+      var yb = padT + ih;
+      if (s.live) s2 += '<rect x="'+(padL+slot*idx+1.5).toFixed(1)+'" y="'+(padT-2)+'" width="'+(slot-3).toFixed(1)+'" height="'+(ih+2)+'" fill="rgba(88,166,255,.07)" rx="4"/>';
+      if (s.plan>0){
+        var hp = Math.max(1.5, s.plan/maxV*ih);
+        s2 += '<rect x="'+xp.toFixed(1)+'" y="'+(yb-hp).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+hp.toFixed(1)+'" fill="#d29922" opacity=".9" rx="1.5"/>';
+      }
+      if (s.actual>0){
+        var ha = Math.max(1.5, s.actual/maxV*ih);
+        var col = (s.plan>0 && s.actual>=s.plan) ? "#3fb950" : "#58a6ff";
+        s2 += '<rect x="'+xa.toFixed(1)+'" y="'+(yb-ha).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+ha.toFixed(1)+'" fill="'+col+'" rx="1.5"/>';
+        s2 += '<text x="'+(xa+bw/2).toFixed(1)+'" y="'+(yb-ha-4).toFixed(1)+'" text-anchor="middle" font-size="7.5" font-weight="700" fill="'+(s.live?"#58a6ff":"#c9d1d9")+'">'+Math.round(s.actual)+'</text>';
+      }
+      s2 += '<text x="'+cx.toFixed(1)+'" y="'+(H-6)+'" text-anchor="middle" font-size="7" fill="'+(s.live?"#58a6ff":"#8b949e")+'">'+fmtSegMin(s.t0)+'</text>';
+    });
+    box.innerHTML = '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">'+s2+'</svg>';
+  }
+  function drawHourlyLive(){
+    var sec = $("hourlySec");
+    if (!sec || sec.style.display==="none" || !hSelName) return;
+    drawHourly();
+  }
+
   /* ── 时间/状态 ── */
   function updText(){
-    var d = new Date();
-    var ds = (d.getMonth()+1)+"-"+String(d.getDate()).padStart(2,"0");
+    var p = (typeof bkkParts === "function") ? bkkParts() : null;
+    var ds = p ? (p.M+"-"+p.D) : (function(){ var d=new Date(); return (d.getMonth()+1)+"-"+String(d.getDate()).padStart(2,"0"); })();
     $("dateTxt").textContent = ds + " " + T("更新于","upd ") + (state.updatedAt || "-");
     $("updTxt").textContent = state.lines.length ? state.lines.length + T(" 条线体"," lines") : "";
     $("srcLine").textContent = "SRC: " + (state.source || "-") + " · " + (state.mode || "");
@@ -466,7 +726,17 @@
   function setConn(ok){
     var dot = $("connDot"), txt = $("connTxt");
     dot.className = "dot " + (ok?"ok":"bad");
-    txt.textContent = ok ? T("已连接","LIVE") : T("连接异常","OFFLINE");
+    // 超过 150s 没数据更新 = 上游数据机断推 (电脑关机/网络断) → 明确警示, 不显示虚假"已连接"
+    var stale = false;
+    if (state.updatedAt){
+      var m = String(state.updatedAt).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+      if (m){
+        var t = Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]) - 7*3600*1000;
+        if (Date.now() - t > 150000) stale = true;
+      }
+    }
+    dot.className = "dot " + ((ok && !stale)?"ok":"bad");
+    txt.textContent = ok ? (stale ? T("数据已停更","STALE") : T("已连接","LIVE")) : T("连接异常","OFFLINE");
   }
 
   /* ── 主循环 ── */
@@ -474,10 +744,12 @@
     fetchJSON(DATA_URL).then(function(d){
       if (d && d.lines){
         state.lines = d.lines;
+        state.hourly = d.hourly || {};
         state.updatedAt = d.updatedAt || null;
         state.source = d.source || "";
         state.mode = d.mode || "";
         setConn(true);
+        sampleNow();
         render();
       } else {
         setConn(false);
@@ -521,6 +793,7 @@
 
   setInterval(loadMain, 60000);
   setInterval(loadAtt, 60000);
+  setInterval(drawHourlyLive, 10000); // 小时产出: 每10秒轻刷当前段/图 (chips 不重建)
   setInterval(reloadLiveData, 600000); // 10分钟
   document.addEventListener("visibilitychange", function(){
     if (!document.hidden) refreshAll();
