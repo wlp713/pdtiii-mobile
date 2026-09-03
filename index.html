@@ -224,7 +224,7 @@
 </div>
 
 <!-- 跨仓库加载: 问题点/首小时/历史达成率 (由电脑端 cron 定时写入 pdtiii-live 仓库) -->
-<script src="https://wlp713.github.io/pdtiii-live/live-data.js?v=mobile"></script>
+<!-- live-data.js 不再静态加载: 固定 URL 会被浏览器长期缓存导致显示昨天数据; 统一由下方 reloadLiveData() 带时间戳动态注入, 保证每次打开/回前台都是最新 -->
 <script>
 (function () {
   "use strict";
@@ -822,17 +822,21 @@
       }
     });
   }
+  var _ldRetry = null;
   function reloadLiveData(){
-    // 重新注入 live-data.js 拿最新问题点/首小时/历史
+    // 动态注入带时间戳的 live-data.js → 永远绕过 HTTP 缓存拿最新问题点/首小时/历史
     var s = document.createElement("script");
     s.src = "https://wlp713.github.io/pdtiii-live/live-data.js?v=mobile" + Date.now();
-    s.onload = function(){ renderProblems(); renderFirstHour(); renderTrend(); };
+    s.onload = function(){ if (_ldRetry){ clearTimeout(_ldRetry); _ldRetry=null; } renderProblems(); renderFirstHour(); renderTrend(); };
+    s.onerror = function(){ // 网络/CDN 抖动 → 30s 后自动重试一次
+      if (!_ldRetry) _ldRetry = setTimeout(function(){ _ldRetry=null; reloadLiveData(); }, 30000);
+    };
     document.head.appendChild(s);
   }
 
   function refreshAll(){
     loadMain();
-    if (!window.__LIVE_DATA__ || !window.__HISTORY__) reloadLiveData();
+    reloadLiveData(); // 无条件刷新: 回前台立即同步最新 (不能因缓存旧数据就跳过)
   }
 
   /* ── 初始化 ── */
@@ -845,7 +849,7 @@
 
   applyLang();
   loadMain();
-  if (!window.__LIVE_DATA__ || !window.__HISTORY__) reloadLiveData();
+  reloadLiveData(); // 启动无条件拉最新: 覆盖任何可能残留的旧版 live-data.js 缓存
 
   setInterval(loadMain, 60000);
   setInterval(drawHourlyLive, 10000); // 小时产出: 每10秒轻刷当前段/图 (chips 不重建)
