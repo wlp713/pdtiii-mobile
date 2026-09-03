@@ -200,11 +200,6 @@
     <div class="hc-hint" id="hourlyHint"></div>
   </div>
 
-  <div class="sec" id="attSec" style="display:none">
-    <div class="sec-h">👥 出勤率 <span class="tag" id="attTag"></span></div>
-    <div id="attBody"></div>
-  </div>
-
   <div class="sec">
     <div class="sec-h">📈 达成率趋势 <span class="tag" id="trendTag">近10个工作日</span></div>
     <div class="chips" id="trendChips"></div>
@@ -240,7 +235,6 @@
   MAIN_LINES.forEach(function(l){ MAIN_SET[normName(l)] = true; });
 
   var DATA_URL = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii.json";
-  var ATT_URL  = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii_att.json";
 
   var state = { lines: [], updatedAt: null, hourly: {} };
 
@@ -284,7 +278,6 @@
     renderProblems();
     renderFirstHour();
     renderHourly();
-    renderAttendance();
     renderTrend();
     updText();
   }
@@ -406,21 +399,6 @@
         var r = Number(e.rate);
         return "<tr><td>" + esc(e.line || e.ws || "-") + "</td><td class='num'>" + (e.target!=null?e.target:"-") + "</td><td class='num'>" + (e.actual!=null?e.actual:"-") + "</td><td class='num " + rateCls(r) + "'>" + (isNaN(r)?"-":r.toFixed(1)+"%") + "</td></tr>";
       }).join("") + "</tbody></table></div>";
-  }
-
-  /* ── 出勤率 (Firebase pdtiii_att) ── */
-  var attData = null;
-  function renderAttendance(){
-    var sec = $("attSec"), body = $("attBody");
-    var att = attData;
-    if (!att || !att.rows || !att.rows.length){ sec.style.display="none"; return; }
-    sec.style.display = "block";
-    $("attTag").textContent = (att.date || "") + " " + T("已录入","entered");
-    body.innerHTML = '<table><thead><tr><th>' + T("车间","WS") + '</th><th class="num">' + T("出勤率","Rate") + '</th></tr></thead><tbody>'
-      + att.rows.map(function(r){
-        var rate = parseFloat(r.rate);
-        return "<tr><td>" + esc(r.ws||"-") + "</td><td class='num " + rateCls(rate) + "'>" + (isNaN(rate)?"-":rate.toFixed(0)+"%") + "</td></tr>";
-      }).join("") + "</tbody></table>";
   }
 
   /* ── 趋势 (__HISTORY__) ── */
@@ -808,15 +786,6 @@
       }
     });
   }
-  function loadAtt(){
-    fetchJSON(ATT_URL).then(function(d){
-      if (d && d.rows && d.rows.length){
-        attData = d;
-        var el = $("attSec");
-        if (el && typeof renderAttendance === "function") renderAttendance();
-      }
-    });
-  }
   function reloadLiveData(){
     // 重新注入 live-data.js 拿最新问题点/首小时/历史
     var s = document.createElement("script");
@@ -826,7 +795,7 @@
   }
 
   function refreshAll(){
-    loadMain(); loadAtt();
+    loadMain();
     if (!window.__LIVE_DATA__ || !window.__HISTORY__) reloadLiveData();
   }
 
@@ -836,15 +805,13 @@
     applyLang();
     render();
   });
-  $("refreshBtn").addEventListener("click", function(){ reloadLiveData(); loadMain(); loadAtt(); });
+  $("refreshBtn").addEventListener("click", function(){ reloadLiveData(); loadMain(); });
 
   applyLang();
   loadMain();
-  loadAtt();
   if (!window.__LIVE_DATA__ || !window.__HISTORY__) reloadLiveData();
 
   setInterval(loadMain, 60000);
-  setInterval(loadAtt, 60000);
   setInterval(drawHourlyLive, 10000); // 小时产出: 每10秒轻刷当前段/图 (chips 不重建)
   setInterval(reloadLiveData, 600000); // 10分钟
   document.addEventListener("visibilitychange", function(){
