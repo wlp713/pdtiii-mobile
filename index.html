@@ -122,17 +122,26 @@
   .chart-empty { color:var(--gray); font-size:12px; text-align:center; padding:22px 0; }
 
   /* ── 小时产出 ── */
-  .hc-legend { display:flex; align-items:center; gap:14px; font-size:10.5px; font-weight:700; color:var(--gray); margin:0 2px 4px; }
+  .hc-legend { display:flex; align-items:center; gap:14px; font-size:10.5px; font-weight:700; color:var(--gray); margin:0 2px 8px; }
   .hc-legend .dot { width:8px; height:8px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:-1px; }
   .lg-act .dot { background:#58a6ff; } .lg-pln .dot { background:#d29922; }
-  .hc-rate { margin-left:auto; color:var(--gray); font-size:10.5px; font-weight:700; }
-  .hc-rate b { font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; }
-  .hc-rate.good b { color:var(--green); } .hc-rate.warn b { color:var(--orange); } .hc-rate.bad b { color:var(--red); }
-  .hc-detail { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; font-size:11px; color:var(--gray); margin:6px 2px 0; min-height:15px; }
-  .hd-seg { color:var(--white); font-weight:800; }
-  .hd-v { color:#c9d1d9; font-weight:700; font-variant-numeric:tabular-nums; }
-  .hd-ok { color:var(--green); font-weight:700; } .hd-warn { color:var(--orange); font-weight:700; } .hd-bad { color:var(--red); font-weight:700; }
-  .hc-hint { font-size:9px; color:#6e7681; margin:4px 2px 0; line-height:1.6; }
+  /* 8 线宫格: 竖屏 2 列×4 行, 宽屏 ≥600px 4 列×2 行 */
+  .hc-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  @media (min-width:600px){ .hc-grid { grid-template-columns:1fr 1fr 1fr 1fr; } }
+  .hc-card {
+    background:var(--panel2); border:1px solid var(--border); border-radius:10px;
+    padding:7px 8px 4px; min-width:0;
+  }
+  .hc-card .hc-head { display:flex; align-items:baseline; gap:4px; margin-bottom:2px; min-width:0; }
+  .hc-card .hc-name { font-size:11px; font-weight:800; color:var(--white); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hc-card .hc-name .dot { width:6px; height:6px; border-radius:50%; background:var(--gray); display:inline-block; margin-right:4px; vertical-align:0; }
+  .hc-card .hc-name .dot.run { background:var(--green); } .hc-card .hc-name .dot.stop { background:var(--red); }
+  .hc-card .hc-rat { margin-left:auto; font-size:15px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; flex-shrink:0; }
+  .hc-card .hc-rat.good { color:var(--green); } .hc-card .hc-rat.warn { color:var(--orange); } .hc-card .hc-rat.bad { color:var(--red); }
+  .hc-card .hc-rat.none { color:var(--gray); font-size:11px; font-weight:600; }
+  .hc-card svg { display:block; width:100%; height:auto; }
+  .hc-card .hc-sub { font-size:8.5px; color:#6e7681; text-align:center; margin-top:1px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; }
+  .hc-hint { font-size:9px; color:#6e7681; margin:8px 2px 0; line-height:1.6; }
 
   /* ── 页脚 ── */
   footer { text-align:center; color:var(--gray); font-size:10.5px; margin-top:16px; line-height:1.8; }
@@ -186,13 +195,9 @@
 
   <div class="sec" id="hourlySec" style="display:none">
     <div class="sec-h">📊 小时产出 <span class="tag" id="hourlyTag">-</span></div>
-    <div class="chips" id="hourlyChips"></div>
-    <div class="chart-box">
-      <div class="hc-legend" id="hourlyLegend"></div>
-      <div id="hourlyChart"></div>
-      <div class="hc-detail" id="hourlyDetail"></div>
-      <div class="hc-hint" id="hourlyHint"></div>
-    </div>
+    <div class="hc-legend" id="hourlyLegend"></div>
+    <div class="hc-grid" id="hourlyGrid"></div>
+    <div class="hc-hint" id="hourlyHint"></div>
   </div>
 
   <div class="sec" id="attSec" style="display:none">
@@ -622,96 +627,143 @@
     }
     return segs;
   }
-  var hSelName = null;
   function hourMains(){
     var out = [];
     MAIN_LINES.forEach(function(n){ var l = lineOf(n); if (l) out.push(l); });
     return out;
   }
+
+  /* ── 8 线宫格小时产出 (v3: 仿桌面双柱纵堆叠, 每卡一图, 无需点选) ── */
+  // 桌面参考: 每线两根纵柱 — 左=实际(蓝, 段内灰缺口+蓝达成), 右=目标(橙),
+  //   两柱共用同一份 segs(按目标值从底向上堆叠) → 段边界逐段对齐, 段内写该时段数值,
+  //   柱顶写当班累计。maxV 每卡独立(小产量线不至于矮到看不见; 达成对比看卡头大字%)。
+  function hcCardSVG(segs, totActual, totPlan){
+    var W=176, H=172, padT=24, padB=4;
+    var iw=W, ih=H-padT-padB;
+    var cx=W/2, bw=30, gap=8;             // 双柱: 左柱中心 cx-gap/2-bw/2 …
+    var maxV=Math.max(totPlan, totActual);
+    if (maxV<=0) maxV=10;
+    maxV = Math.ceil(maxV*1.16/10)*10;     // 顶部留 ~16% 给柱顶数字
+    var yb = padT+ih;                       // 柱底基线
+    var s='';
+    // 灰缺口/柱底深色背景描边仅用于视觉; 逐段堆叠, 从底向上 (segs 按时间升序 → 正序画: 早段在下, live 最新段在最顶, 与桌面一致)
+    var yAcc = yb;
+    for (var i=0;i<segs.length;i++){
+      var seg = segs[i];
+      // 段层高 = 该段目标值(骨架)占比; 若段无目标(plan=0)但有实际 → 用实际兜底
+      var ph = (seg.plan>0 ? seg.plan : seg.actual) / maxV * ih;
+      if (ph < 1.2) ph = 1.2;
+      var yTop = yAcc - ph;
+      var isLive = seg.live;
+      // live 段淡蓝底罩(横贯两柱)
+      if (isLive) s += '<rect x="'+(cx-gap/2-bw-4)+'" y="'+yTop.toFixed(1)+'" width="'+(bw*2+gap+8)+'" height="'+ph.toFixed(1)+'" fill="rgba(88,166,255,.09)" rx="2"/>';
+      // ── 实际柱(左) ── 灰缺口打底, 蓝画达成部分
+      var xa = cx - gap/2 - bw;
+      var ha = Math.min(ph, seg.actual/maxV*ih);       // 超额 → 蓝画满层(柱顶数字显真实值)
+      s += '<rect x="'+xa+'" y="'+yTop.toFixed(1)+'" width="'+bw+'" height="'+ph.toFixed(1)+'" fill="#21262d"/>';
+      if (ha>0) s += '<rect x="'+xa+'" y="'+(yAcc-ha).toFixed(1)+'" width="'+bw+'" height="'+ha.toFixed(1)+'" fill="#58a6ff"/>';
+      // ── 目标柱(右) ── 橙
+      var xp = cx + gap/2;
+      s += '<rect x="'+xp+'" y="'+yTop.toFixed(1)+'" width="'+bw+'" height="'+ph.toFixed(1)+'" fill="#d29922" opacity=".92"/>';
+      // ── 段边界黑线(横贯两柱, 桌面加粗口径)
+      s += '<rect x="'+(cx-gap/2-bw-1)+'" y="'+yTop.toFixed(1)+'" width="'+(bw*2+gap+2)+'" height="1.6" fill="#000"/>';
+      // ── 段内数值: 实际柱写实际达成, 目标柱写该段目标; 字体随段高自适应; live 段字号-1 不喧宾夺主
+      var fs = ph>=24?8.5:ph>=18?8:ph>=13?7.5:ph>=9.5?7:ph>=7?6.5:0;
+      if (fs>0 && ph>=10){
+        var fs2 = isLive ? Math.max(6,fs-1) : fs;
+        s += '<text x="'+(xa+bw/2)+'" y="'+(yAcc-ph/2+fs2*0.35).toFixed(1)+'" text-anchor="middle" font-size="'+fs2+'" font-weight="700" fill="#e6edf3">'+Math.round(seg.actual)+'</text>';
+        s += '<text x="'+(xp+bw/2)+'" y="'+(yAcc-ph/2+fs2*0.35).toFixed(1)+'" text-anchor="middle" font-size="'+fs2+'" font-weight="700" fill="#0d1117">'+Math.round(seg.plan)+'</text>';
+      }
+      yAcc = yTop;
+    }
+    // 柱顶累计(两柱同基线, 写在各柱正上方)
+    if (segs.length){
+      var yTxt = yAcc - 6;
+      if (yTxt < 11) yTxt = 11;
+      var maxReached = Math.max(totActual, totPlan);
+      s += '<text x="'+(cx-gap/2-bw/2)+'" y="'+yTxt+'" text-anchor="middle" font-size="9" font-weight="800" fill="'+(totActual>=totPlan?'#3fb950':'#58a6ff')+'">'+fmt(Math.round(totActual))+'</text>';
+      s += '<text x="'+(cx+gap/2+bw/2)+'" y="'+yTxt+'" text-anchor="middle" font-size="9" font-weight="800" fill="#d29922">'+fmt(Math.round(totPlan))+'</text>';
+    }
+    return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'+s+'</svg>';
+  }
+
+  function hcSubLine(segs){
+    if (!segs.length) return '';
+    var dv = segs[segs.length-1];
+    return (zh?'第':'Seg ')+dv.lab+' · '+fmtSegMin(dv.t0)+'-'+fmtSegMin(dv.t1)+(dv.live?(zh?' 进行中':' live'):'');
+  }
+
   function renderHourly(){
     var sec = $("hourlySec");
     if (!sec) return;
     var mains = hourMains();
     if (!mains.length){ sec.style.display = "none"; return; }
     sec.style.display = "block";
-    if (!hSelName || !mains.some(function(l){ return l.name===hSelName; })) hSelName = mains[0].name;
-    var chipBox = $("hourlyChips");
-    chipBox.innerHTML = mains.map(function(l){
-      return '<span class="chip' + (l.name===hSelName ? " on" : "") + '" data-hl="' + esc(l.name) + '">' + esc(shortName(l.name)) + '</span>';
-    }).join("");
-    Array.prototype.forEach.call(chipBox.querySelectorAll(".chip"), function(c){
-      c.addEventListener("click", function(){ hSelName = c.getAttribute("data-hl"); renderHourly(); });
-    });
-    drawHourly();
-  }
-  function drawHourly(){
-    var sec = $("hourlySec");
-    if (!sec || sec.style.display==="none" || !hSelName) return;
-    var cur = lineOf(hSelName);
-    var curActual = cur ? (Number(cur.actual)||0) : 0;
-    var curPlan = cur ? (Number(cur.plan)||0) : 0;
-    var segs = segsOfHour(hSelName, curActual, curPlan);
     var sc = shiftSegAt(bkkMin());
     var night = sc.shift === "night";
     $("hourlyTag").textContent = (night?T("夜班","Night"):T("白班","Day")) + " · " + T("段","Seg ") + sc.idx;
-    var rateTxt = "";
-    if (curPlan > 0){
-      var rr = curActual/curPlan*100;
-      rateTxt = '<span class="hc-rate ' + (rr>=90?"good":(rr>=70?"warn":"bad")) + '">' + T("当班产量达成","Rate ") + '<b>' + rr.toFixed(0) + '%</b></span>';
-    }
-    $("hourlyLegend").innerHTML = '<span class="lg-act"><i class="dot"></i>' + T("实际","Act") + '</span><span class="lg-pln"><i class="dot"></i>' + T("目标","Plan") + '</span>' + rateTxt;
+    $("hourlyLegend").innerHTML = '<span class="lg-act"><i class="dot"></i>' + T("实际","Act") + '</span><span class="lg-pln"><i class="dot"></i>' + T("目标","Plan") + '</span>';
     $("hourlyHint").textContent = zh ? (night
       ? "夜班休息不计时段: 22:30-22:40 · 00:30-01:30 · 次日 07:50-08:00 交班"
       : "休息不计时段: 10:00-10:10 · 12:00-13:00 午休 · 15:00-15:10 · 17:00-17:20 · 20:20-20:30 交班") : "";
-    var box = $("hourlyChart");
-    if (!segs.length){
-      box.innerHTML = '<div class="chart-empty">' + T("暂无进行中时段 (休息/交班)","No active segment") + '</div>';
-      $("hourlyDetail").innerHTML = "";
-      return;
-    }
-    var dv = segs[segs.length-1];
-    var dRate = dv.plan>0 ? dv.actual/dv.plan*100 : NaN;
-    var dCls = isNaN(dRate) ? "" : (dRate>=90?"hd-ok":(dRate>=70?"hd-warn":"hd-bad"));
-    $("hourlyDetail").innerHTML =
-      '<span class="hd-seg">' + T("段","Seg ") + dv.lab + ' ' + fmtSegMin(dv.t0) + '-' + fmtSegMin(dv.t1) + (dv.live ? ' · ' + T("进行中","live") : "") + '</span>'
-      + '<span>' + T("实际","Act") + ' <span class="hd-v">' + fmt(Math.round(dv.actual)) + '</span></span>'
-      + '<span>' + T("目标","Plan") + ' <span class="hd-v">' + fmt(Math.round(dv.plan)) + '</span></span>'
-      + (isNaN(dRate) ? "" : '<span class="' + dCls + '">' + T("达成","") + ' ' + dRate.toFixed(0) + '%</span>');
-    // ── SVG 双柱图: 每时段 = 实际柱(左, 蓝/达成绿) + 目标柱(右, 橙), 柱顶标实际值, 底部时段起点时间 ──
-    var W=344, H=158, padL=36, padR=6, padT=20, padB=18;
-    var iw=W-padL-padR, ih=H-padT-padB;
-    var n=segs.length, slot=iw/n;
-    var maxV=0;
-    segs.forEach(function(s){ maxV=Math.max(maxV, s.actual, s.plan); });
-    if (maxV<=0) maxV=10;
-    maxV = Math.ceil(maxV/50)*50;
-    var s2 = '<line x1="'+padL+'" y1="'+padT+'" x2="'+(W-padR)+'" y2="'+padT+'" stroke="#21262d" stroke-width="1"/>'
-      + '<text x="'+(padL-5)+'" y="'+(padT+3)+'" text-anchor="end" font-size="7.5" fill="#8b949e">'+maxV+'</text>'
-      + '<line x1="'+padL+'" y1="'+(padT+ih)+'" x2="'+(W-padR)+'" y2="'+(padT+ih)+'" stroke="#30363d" stroke-width="1"/>';
-    var bw = Math.max(5, Math.min(13, slot*0.3));
-    var gap = 4;
-    segs.forEach(function(s, idx){
-      var cx = padL + slot*idx + slot/2;
-      var xa = cx - bw - gap/2, xp = cx + gap/2;
-      var yb = padT + ih;
-      if (s.live) s2 += '<rect x="'+(padL+slot*idx+1.5).toFixed(1)+'" y="'+(padT-2)+'" width="'+(slot-3).toFixed(1)+'" height="'+(ih+2)+'" fill="rgba(88,166,255,.07)" rx="4"/>';
-      if (s.plan>0){
-        var hp = Math.max(1.5, s.plan/maxV*ih);
-        s2 += '<rect x="'+xp.toFixed(1)+'" y="'+(yb-hp).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+hp.toFixed(1)+'" fill="#d29922" opacity=".9" rx="1.5"/>';
-      }
-      if (s.actual>0){
-        var ha = Math.max(1.5, s.actual/maxV*ih);
-        var col = (s.plan>0 && s.actual>=s.plan) ? "#3fb950" : "#58a6ff";
-        s2 += '<rect x="'+xa.toFixed(1)+'" y="'+(yb-ha).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+ha.toFixed(1)+'" fill="'+col+'" rx="1.5"/>';
-        s2 += '<text x="'+(xa+bw/2).toFixed(1)+'" y="'+(yb-ha-4).toFixed(1)+'" text-anchor="middle" font-size="7.5" font-weight="700" fill="'+(s.live?"#58a6ff":"#c9d1d9")+'">'+Math.round(s.actual)+'</text>';
-      }
-      s2 += '<text x="'+cx.toFixed(1)+'" y="'+(H-6)+'" text-anchor="middle" font-size="7" fill="'+(s.live?"#58a6ff":"#8b949e")+'">'+fmtSegMin(s.t0)+'</text>';
+    var grid = $("hourlyGrid");
+    var html = "";
+    var any = false;
+    mains.forEach(function(l){
+      var curActual = Number(l.actual)||0, curPlan = Number(l.plan)||0;
+      var segs = segsOfHour(l.name, curActual, curPlan);
+      if (segs.length) any = true;
+      var r = curPlan>0 ? curActual/curPlan*100 : NaN;
+      var rCls = isNaN(r) ? "none" : (r>=90?"good":(r>=70?"warn":"bad"));
+      var st = String(l.status||"");
+      var dot = (/run|work|开/i.test(st)) ? "run" : (/stop|停/i.test(st)) ? "stop" : "";
+      var segBody = segs.length ? hcCardSVG(segs, curActual, curPlan)
+        : '<div class="chart-empty" style="padding:26px 0 20px">'+T("暂无数据","—")+'</div>';
+      html += '<div class="hc-card" data-line="'+esc(l.name)+'">'
+        + '<div class="hc-head"><span class="hc-name">'+(dot?'<i class="dot '+dot+'"></i>':'')+esc(shortName(l.name))+'</span>'
+        + '<span class="hc-rat '+rCls+'">'+(isNaN(r)?'--':r.toFixed(0)+'%')+'</span></div>'
+        + segBody
+        + '<div class="hc-sub">'+esc(hcSubLine(segs))+'</div>'
+        + '</div>';
     });
-    box.innerHTML = '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">'+s2+'</svg>';
+    grid.innerHTML = html;
+    if (!any){
+      grid.innerHTML = '<div class="chart-empty" style="grid-column:1/-1">' + T("暂无进行中时段 (休息/交班)","No active segment") + '</div>';
+    }
   }
-  function drawHourlyLive(){
+
+  function drawHourly(){
     var sec = $("hourlySec");
-    if (!sec || sec.style.display==="none" || !hSelName) return;
+    if (!sec || sec.style.display==="none") return;
+    // 轻刷: 不动卡结构, 只重算每卡 svg + 达成率大字(10s 定时器用)
+    var sc = shiftSegAt(bkkMin());
+    var night = sc.shift === "night";
+    $("hourlyTag").textContent = (night?T("夜班","Night"):T("白班","Day")) + " · " + T("段","Seg ") + sc.idx;
+    var grid = $("hourlyGrid");
+    if (!grid) return;
+    var empty = grid.querySelector(".chart-empty");
+    if (empty && grid.children.length===1) return; // 整区空态, 无需刷
+    Array.prototype.forEach.call(grid.querySelectorAll(".hc-card"), function(card){
+      var l = lineOf(card.getAttribute("data-line"));
+      if (!l) return;
+      var curActual = Number(l.actual)||0, curPlan = Number(l.plan)||0;
+      var segs = segsOfHour(l.name, curActual, curPlan);
+      var r = curPlan>0 ? curActual/curPlan*100 : NaN;
+      var rCls = isNaN(r) ? "none" : (r>=90?"good":(r>=70?"warn":"bad"));
+      var rat = card.querySelector(".hc-rat");
+      if (rat){ rat.className = "hc-rat "+rCls; rat.textContent = isNaN(r)?'--':r.toFixed(0)+'%'; }
+      var sub = card.querySelector(".hc-sub");
+      if (sub) sub.textContent = hcSubLine(segs);
+      var body = segs.length ? hcCardSVG(segs, curActual, curPlan)
+        : '<div class="chart-empty" style="padding:26px 0 20px">'+T("暂无数据","—")+'</div>';
+      var oldSvg = card.querySelector("svg"), oldEm = card.querySelector(".chart-empty");
+      if (oldSvg) oldSvg.outerHTML = body;
+      else if (oldEm) oldEm.outerHTML = body;
+      else card.insertAdjacentHTML("beforeend", body);
+    });
+  }
+
+  function drawHourlyLive(){
     drawHourly();
   }
 
