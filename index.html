@@ -117,6 +117,8 @@
     border:1px solid var(--border); background:var(--panel2); color:var(--gray); cursor:pointer;
   }
   .chip.on { background:rgba(88,166,255,.15); border-color:var(--blue); color:var(--blue); }
+  .chip.dim { opacity:.38; cursor:not-allowed; }
+  .chip .cnt { opacity:.65; font-size:9px; font-weight:600; margin-left:1px; }
   .chart-box { background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:8px; }
   svg { display:block; width:100%; height:auto; }
   .chart-empty { color:var(--gray); font-size:12px; text-align:center; padding:22px 0; }
@@ -179,7 +181,8 @@
   </div>
 
   <div class="sec">
-    <div class="sec-h" id="secHMain">🏭 主要线体 <span class="tag" id="otherTag"></span></div>
+    <div class="sec-h" id="secHMain">🏭 线体 <span class="tag" id="wsSelTag"></span></div>
+    <div class="chips" id="wsChips"></div>
     <div id="mainLines"></div>
   </div>
 
@@ -206,16 +209,6 @@
     <div class="chart-box"><div id="trendChart"></div></div>
   </div>
 
-  <div class="sec" id="othSec" style="display:none">
-    <div class="sec-h" id="secHOth">📊 其他线体 <span class="tag" id="othTag">-</span></div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr><th id="thLine">线体</th><th class="num" id="thAct">实际</th><th class="num" id="thPlan">计划</th><th class="num" id="thGap">差异</th><th class="num" id="thRate">达成率</th></tr></thead>
-        <tbody id="othBody"></tbody>
-      </table>
-    </div>
-  </div>
-
   <button class="refresh-btn" id="refreshBtn">🔄 手动刷新</button>
   <footer>
     <div class="src-line" id="srcLine"></div>
@@ -233,6 +226,21 @@
   function normName(n){ return String(n||"").toLowerCase().replace(/\s+/g,""); }
   var MAIN_SET = {};
   MAIN_LINES.forEach(function(l){ MAIN_SET[normName(l)] = true; });
+
+  // ★ 2026-09-03 车间分类 (与桌面一致, 名称用线上实测名; 未命中车间的线体归入"其它")
+  var WS_GROUPS = [
+    { ws: "PRO1", lines: ["Motor AC", "Motor CL", "Motor WL", "Motor F-Series", "Motor H-Series", "Motor S-Series"] },
+    { ws: "PRO2", lines: ["Final A line", "Final B Line", "Final C line", "Final D line", "Inspection A", "Inspection B", "Inspection C", "Inspection D", "Water Line", "Rotor A line", "Rotor B Line", "Rotor C line", "Rotor D Line"] },
+    { ws: "PRO3", lines: ["Welding A line", "Welding B line", "Welding C line", "Welding D line", "Press C-Shaft"] },
+    { ws: "PRO4", lines: ["C-Shaft Body A", "C-Shaft Body B", "C-Shaft Pin A", "C-Shaft Pin C", "C-Shft Pin B", "Piston Grinding", "Rod Pispin", "Frame Honing FL"] },
+    { ws: "PRO5", lines: ["Piston honing FL", "Cylinder Honing"] },
+    { ws: "PRO6", lines: [] }
+  ];
+  var LINE2WS = {};
+  WS_GROUPS.forEach(function(g){ g.lines.forEach(function(ln){ LINE2WS[normName(ln)] = g.ws; }); });
+  var wsSel = null;   // null = 主要线体视图 (默认, 与原版一致); 选中后=该车间全部线体
+  function wsGroupOf(l){ return LINE2WS[normName(l && l.name)] || null; }
+  function wsLinesOf(ws){ return (state.lines||[]).filter(function(l){ return wsGroupOf(l) === ws; }); }
 
   var DATA_URL = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii.json";
 
@@ -260,19 +268,12 @@
     $("kpiFinalSub").textContent = zh ? "Final A-D 合计" : "Final A-D total";
     $("kpiMotorLb").textContent = zh ? "🟠 Motor 产量" : "🟠 Motor Qty";
     $("kpiMotorSub").textContent = zh ? "Motor H/S/F/WL 合计" : "Motor H/S/F/WL total";
-    $("secHMain").innerHTML = (zh?"🏭 主要线体":"🏭 Main Lines") + ' <span class="tag" id="otherTag"></span>';
-    $("otherTag").textContent = zh ? "其他线体明细见下方" : "other lines below";
+    updSecHMain();
     $("secHProb").innerHTML = (zh?"🚨 未达成原因 · 主要问题点":"🚨 Miss Reasons · Top Issues") + ' <span class="tag" id="probSrc">-</span>';
     $("secHFh").textContent = zh ? "⏰ 首小时达成 (8-9点)" : "⏰ 1st-Hour Target (8-9)";
-    $("secHHourly").innerHTML = (zh?"📊 小时产出":"📊 Hourly Output") + ' <span class="tag" id="hourlyTag">-</span>';
     $("secHTrend").innerHTML = (zh?"📈 达成率趋势":"📈 Rate Trend") + ' <span class="tag" id="trendTag">近10个工作日</span>';
     $("trendTag").textContent = zh ? "近10个工作日" : "last 10 workdays";
-    $("secHOth").innerHTML = (zh?"📊 其他线体":"📊 Other Lines") + ' <span class="tag" id="othTag">-</span>';
-    $("thLine").textContent = zh ? "线体" : "Line";
-    $("thAct").textContent = zh ? "实际" : "Act";
-    $("thPlan").textContent = zh ? "计划" : "Plan";
-    $("thGap").textContent = zh ? "差异" : "Gap";
-    $("thRate").textContent = zh ? "达成率" : "Rate";
+    $("secHHourly").innerHTML = (zh?"📊 小时产出":"📊 Hourly Output") + ' <span class="tag" id="hourlyTag">-</span>';
     $("refreshBtn").textContent = zh ? "🔄 手动刷新" : "🔄 Refresh";
     $("footNote").textContent = zh ? "手机版 · 数据每 60 秒自动刷新" : "mobile · auto refresh every 60s";
     document.title = zh ? "生产实时看板 · 手机版" : "Production Board · Mobile";
@@ -288,20 +289,87 @@
   function render(){
     var lines = state.lines || [];
     if (!lines.length) return;
-    var mains = [], others = [];
+    var mains = [];
     lines.forEach(function(l){
-      var k = normName(l.name);
-      if (MAIN_SET[k]) mains.push(l); else others.push(l);
+      if (MAIN_SET[normName(l.name)]) mains.push(l);
     });
     renderKpis(mains, lines);
-    renderMain(mains);
-    renderOthers(others);
+    // ★ 2026-09-03: 列表视图 = 选车间则全部车间线体(含主线), 否则原主要 8 条
+    var view = wsSel ? wsLinesOf(wsSel) : mains;
+    renderMain(view, wsSel !== null);
+    updWsChips();
     renderStall(lines);
     renderProblems();
     renderFirstHour();
     renderHourly();
     renderTrend();
     updText();
+  }
+
+  // ★ 车间 chips: 一次性构建, 每次数据刷新只更新计数/高亮/标题
+  function buildWsChips(){
+    var box = $("wsChips");
+    if (!box || box.dataset.built) return;
+    box.dataset.built = "1";
+    // 首 chip = 主要线体视图(默认)
+    var all = document.createElement("div");
+    all.className = "chip on";
+    all.dataset.ws = "";
+    all.textContent = T("主要","Main");
+    all.addEventListener("click", function(){ setWs(null); });
+    box.appendChild(all);
+    WS_GROUPS.forEach(function(g){
+      var c = document.createElement("div");
+      c.className = "chip";
+      c.dataset.ws = g.ws;
+      c.innerHTML = g.ws + ' <span class="cnt"></span>';
+      c.addEventListener("click", function(){ if (c.classList.contains("dim")) return; setWs(wsSel === g.ws ? null : g.ws); });
+      box.appendChild(c);
+    });
+    updWsChips();
+  }
+  function updWsChips(){
+    var box = $("wsChips");
+    if (!box) return;
+    var alive = {};
+    (state.lines||[]).forEach(function(l){
+      var ws = wsGroupOf(l);
+      if (ws) alive[ws] = (alive[ws]||0) + 1;
+    });
+    Array.prototype.forEach.call(box.querySelectorAll(".chip"), function(c){
+      var ws = c.dataset.ws;
+      c.classList.toggle("on", ws === (wsSel||""));
+      var n = ws ? (alive[ws]||0) : null;
+      var span = c.querySelector(".cnt");
+      if (span && n !== null) span.textContent = n ? "("+n+")" : "";
+      // 空车间置灰不可点 (PRO6 恒空); 未选车间时若当前车间空了 → 自动回默认主要视图
+      var empty = (ws !== "") && n === 0;
+      c.classList.toggle("dim", empty);
+      if (empty && wsSel === ws) setWs(null);
+    });
+    updSecHMain();
+  }
+  function updSecHMain(){
+    // 标题静态已由 HTML 给出, tag 动态显示当前范围
+    var tag = $("wsSelTag");
+    if (!tag) return;
+    if (wsSel){
+      tag.textContent = wsSel + " · " + wsLinesOf(wsSel).length + " " + T("条","lines");
+    } else {
+      var m = 0;
+      (state.lines||[]).forEach(function(l){ if (MAIN_SET[normName(l.name)]) m++; });
+      tag.textContent = T("主要 ","Main ") + m + "/" + (state.lines||[]).length;
+    }
+  }
+  function setWs(ws){
+    wsSel = ws;
+    updWsChips();
+    renderMain(wsSel ? wsLinesOf(wsSel) : mainLinesOf(), wsSel !== null);
+  }
+  function mainLinesOf(){
+    var out = [];
+    (state.lines||[]).forEach(function(l){ if (MAIN_SET[normName(l.name)]) out.push(l); });
+    return out;
   }
 
   function renderKpis(mains, all){
@@ -326,9 +394,14 @@
     $("kpiMotor").textContent = fmt(mot);
   }
 
-  function renderMain(mains){
+  function renderMain(mains, wsMode){
     var box = $("mainLines"), h = "";
-    mains = mains.slice().sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
+    mains = (mains||[]).slice().sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
+    if (!mains.length){
+      // 空车间/无数据: 给空态提示(桌面同步口径)
+      box.innerHTML = '<div style="text-align:center;color:#8b949e;padding:26px 0;font-size:13px">' + esc(wsMode ? (wsSel + " · " + T("暂无数据","no data")) : T("暂无数据","no data")) + '</div>';
+      return;
+    }
     mains.forEach(function(l, i){
       var e = Number(l.eff), r = Number(l.actual)||0, p = Number(l.plan)||0, cb = Number(l.cb);
       var rc = rateCls(e);
@@ -354,22 +427,7 @@
     box.innerHTML = h;
   }
 
-  function renderOthers(others){
-    var sec = $("othSec"), body = $("othBody");
-    if (!others.length){ sec.style.display = "none"; return; }
-    others.sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
-    sec.style.display = "block";
-    $("othTag").textContent = others.length + " " + T("条","lines");
-    body.innerHTML = others.map(function(l){
-      var e = Number(l.eff), cb = Number(l.cb);
-      return "<tr><td>" + esc(shortName(l.name)) + "</td>"
-        + "<td class='num'>" + fmt(l.actual) + "</td>"
-        + "<td class='num'>" + fmt(l.plan) + "</td>"
-        + "<td class='num " + (isNaN(cb)?"":(cb<0?"rate-bad":"rate-ok")) + "'>" + (isNaN(cb)?"-":fmt(cb)) + "</td>"
-        + "<td class='num " + rateCls(e) + "'>" + (isNaN(e)?"-":e.toFixed(1)+"%") + "</td></tr>";
-    }).join("");
-  }
-
+  function renderOthers(others){ /* 2026-09-03: othSec 已删, 车间分组替代其他线体表格 */ }
   function renderStall(lines){
     var stalls = lines.filter(function(l){ return l.stalled; });
     var b = $("stallBanner");
@@ -848,6 +906,7 @@
   $("refreshBtn").addEventListener("click", function(){ reloadLiveData(); loadMain(); });
 
   applyLang();
+  buildWsChips();   // 2026-09-03: 车间 chips 一次性构建(数据刷新时只 updWsChips)
   loadMain();
   reloadLiveData(); // 启动无条件拉最新: 覆盖任何可能残留的旧版 live-data.js 缓存
 
