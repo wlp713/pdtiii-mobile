@@ -533,6 +533,15 @@
   }
   function saveSamps(){ try { localStorage.setItem(SAMP_KEY, JSON.stringify(sampStore)); } catch(e){ /* ignore */ } }
   function sampDay(ts){ var d0=bkkDay0(ts); if (bkkMin(ts)<8*60) d0-=24*3600*1000; return d0; } // 泰国0-8点归前一天晚班
+  // ★ 班次键: actual 在 8:00 与 20:30 换班清零重计 → 白班/晚班是两个独立累计序列,
+  //   仅按天过滤会把同一天白班采样(大累计)污染晚班段查询(跨端重开必现)。
+  //   白班(8:00-20:30)→ D+当天; 晚班 20:30-24:00 → N+当天; 晚班 0:00-8:00 → N+前一天
+  function sampShiftKey(ts){
+    var m = bkkMin(ts), d0 = bkkDay0(ts);
+    if (m >= NIGHT_START) return "N" + d0;
+    if (m < NIGHT_END) return "N" + (d0 - 24*3600*1000);
+    return "D" + d0;
+  }
   function sampleNow(){
     try {
       var now = Date.now(), store = loadSamps();
@@ -554,10 +563,10 @@
   function hValueAt(name, t, usePlan, dayOff){
     var tMs = bkkDay0() + (t + (dayOff||0)*1440)*60000;
     var arr = (loadSamps())[name] || [];
-    var best = null, qDay = sampDay(tMs);
+    var best = null, qKey = sampShiftKey(tMs);
     for (var i=0;i<arr.length;i++){
       if (arr[i].ts > tMs) break;
-      if (sampDay(arr[i].ts) !== qDay) continue;
+      if (sampShiftKey(arr[i].ts) !== qKey) continue;
       if (usePlan){ if (arr[i].p != null) best = arr[i].p; } else { best = arr[i].a; }
     }
     if (best != null) return best;
