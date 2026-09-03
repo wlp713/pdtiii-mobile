@@ -172,45 +172,45 @@
   <div class="stall-banner" id="stallBanner">⚠️ <span id="stallTxt"></span></div>
 
   <div class="kpis">
-    <div class="kpi"><div class="lb">⚡ 平均效率</div><div class="val" id="kpiEff">-</div><div class="sub">主要线体·计划量加权</div></div>
-    <div class="kpi"><div class="lb">🏆 达成线体 ≥90%</div><div class="val" id="kpiHit">-</div><div class="sub" id="kpiHitSub">达成 x/8</div></div>
-    <div class="kpi"><div class="lb">🔵 Final 产量</div><div class="val blue" id="kpiFinal">-</div><div class="sub">Final A-D 合计</div></div>
-    <div class="kpi"><div class="lb">🟠 Motor 产量</div><div class="val orange" id="kpiMotor">-</div><div class="sub">Motor H/S/F/WL 合计</div></div>
+    <div class="kpi"><div class="lb" id="kpiEffLb">⚡ 平均效率</div><div class="val" id="kpiEff">-</div><div class="sub" id="kpiEffSub">主要线体·计划量加权</div></div>
+    <div class="kpi"><div class="lb" id="kpiHitLb">🏆 达成线体 ≥90%</div><div class="val" id="kpiHit">-</div><div class="sub" id="kpiHitSub">达成 x/8</div></div>
+    <div class="kpi"><div class="lb" id="kpiFinalLb">🔵 Final 产量</div><div class="val blue" id="kpiFinal">-</div><div class="sub" id="kpiFinalSub">Final A-D 合计</div></div>
+    <div class="kpi"><div class="lb" id="kpiMotorLb">🟠 Motor 产量</div><div class="val orange" id="kpiMotor">-</div><div class="sub" id="kpiMotorSub">Motor H/S/F/WL 合计</div></div>
   </div>
 
   <div class="sec">
-    <div class="sec-h">🏭 主要线体 <span class="tag" id="otherTag"></span></div>
+    <div class="sec-h" id="secHMain">🏭 主要线体 <span class="tag" id="otherTag"></span></div>
     <div id="mainLines"></div>
   </div>
 
   <div class="sec" id="probSec" style="display:none">
-    <div class="sec-h">🚨 未达成原因 · 主要问题点 <span class="tag" id="probSrc">-</span></div>
+    <div class="sec-h" id="secHProb">🚨 未达成原因 · 主要问题点 <span class="tag" id="probSrc">-</span></div>
     <div id="probBody"></div>
   </div>
 
   <div class="sec" id="fhSec" style="display:none">
-    <div class="sec-h">⏰ 首小时达成 (8-9点)</div>
+    <div class="sec-h" id="secHFh">⏰ 首小时达成 (8-9点)</div>
     <div id="fhBody"></div>
   </div>
 
   <div class="sec" id="hourlySec" style="display:none">
-    <div class="sec-h">📊 小时产出 <span class="tag" id="hourlyTag">-</span></div>
+    <div class="sec-h" id="secHHourly">📊 小时产出 <span class="tag" id="hourlyTag">-</span></div>
     <div class="hc-legend" id="hourlyLegend"></div>
     <div class="hc-grid" id="hourlyGrid"></div>
     <div class="hc-hint" id="hourlyHint"></div>
   </div>
 
   <div class="sec">
-    <div class="sec-h">📈 达成率趋势 <span class="tag" id="trendTag">近10个工作日</span></div>
+    <div class="sec-h" id="secHTrend">📈 达成率趋势 <span class="tag" id="trendTag">近10个工作日</span></div>
     <div class="chips" id="trendChips"></div>
     <div class="chart-box"><div id="trendChart"></div></div>
   </div>
 
   <div class="sec" id="othSec" style="display:none">
-    <div class="sec-h">📊 其他线体 <span class="tag" id="othTag">-</span></div>
+    <div class="sec-h" id="secHOth">📊 其他线体 <span class="tag" id="othTag">-</span></div>
     <div style="overflow-x:auto">
       <table>
-        <thead><tr><th>线体</th><th class="num">实际</th><th class="num">计划</th><th class="num">差异</th><th class="num">达成率</th></tr></thead>
+        <thead><tr><th id="thLine">线体</th><th class="num" id="thAct">实际</th><th class="num" id="thPlan">计划</th><th class="num" id="thGap">差异</th><th class="num" id="thRate">达成率</th></tr></thead>
         <tbody id="othBody"></tbody>
       </table>
     </div>
@@ -219,7 +219,7 @@
   <button class="refresh-btn" id="refreshBtn">🔄 手动刷新</button>
   <footer>
     <div class="src-line" id="srcLine"></div>
-    <div>手机版 · 数据每 60 秒自动刷新</div>
+    <div id="footNote">手机版 · 数据每 60 秒自动刷新</div>
   </footer>
 </div>
 
@@ -247,12 +247,34 @@
   function T(zhTxt, enTxt){ return zh ? zhTxt : enTxt; }
 
   /* ── 语言 ── */
+  var connOk = null;   // 最近一次连接状态(null=尚未加载完成); 供切语言后重放
   function applyLang(){
     $("title").innerHTML = (zh?"🏭 生产实时看板":"🏭 Production Board") + " <small>" + (zh?"手机版":"MOBILE") + "</small>";
     $("langBtn").textContent = zh ? "EN" : "中";
+    if (connOk === null) $("connTxt").textContent = zh ? "连接中…" : "connecting…"; else setConn(connOk);
     $("kpiHitSub").textContent = zh ? "达成 x/8" : "hit x/8";
+    $("kpiEffLb").textContent = zh ? "⚡ 平均效率" : "⚡ Avg Eff";
+    $("kpiEffSub").textContent = zh ? "主要线体·计划量加权" : "main lines · plan-wtd";
+    $("kpiHitLb").textContent = zh ? "🏆 达成线体 ≥90%" : "🏆 Lines ≥90%";
+    $("kpiFinalLb").textContent = zh ? "🔵 Final 产量" : "🔵 Final Qty";
+    $("kpiFinalSub").textContent = zh ? "Final A-D 合计" : "Final A-D total";
+    $("kpiMotorLb").textContent = zh ? "🟠 Motor 产量" : "🟠 Motor Qty";
+    $("kpiMotorSub").textContent = zh ? "Motor H/S/F/WL 合计" : "Motor H/S/F/WL total";
+    $("secHMain").innerHTML = (zh?"🏭 主要线体":"🏭 Main Lines") + ' <span class="tag" id="otherTag"></span>';
     $("otherTag").textContent = zh ? "其他线体明细见下方" : "other lines below";
+    $("secHProb").innerHTML = (zh?"🚨 未达成原因 · 主要问题点":"🚨 Miss Reasons · Top Issues") + ' <span class="tag" id="probSrc">-</span>';
+    $("secHFh").textContent = zh ? "⏰ 首小时达成 (8-9点)" : "⏰ 1st-Hour Target (8-9)";
+    $("secHHourly").innerHTML = (zh?"📊 小时产出":"📊 Hourly Output") + ' <span class="tag" id="hourlyTag">-</span>';
+    $("secHTrend").innerHTML = (zh?"📈 达成率趋势":"📈 Rate Trend") + ' <span class="tag" id="trendTag">近10个工作日</span>';
+    $("trendTag").textContent = zh ? "近10个工作日" : "last 10 workdays";
+    $("secHOth").innerHTML = (zh?"📊 其他线体":"📊 Other Lines") + ' <span class="tag" id="othTag">-</span>';
+    $("thLine").textContent = zh ? "线体" : "Line";
+    $("thAct").textContent = zh ? "实际" : "Act";
+    $("thPlan").textContent = zh ? "计划" : "Plan";
+    $("thGap").textContent = zh ? "差异" : "Gap";
+    $("thRate").textContent = zh ? "达成率" : "Rate";
     $("refreshBtn").textContent = zh ? "🔄 手动刷新" : "🔄 Refresh";
+    $("footNote").textContent = zh ? "手机版 · 数据每 60 秒自动刷新" : "mobile · auto refresh every 60s";
     document.title = zh ? "生产实时看板 · 手机版" : "Production Board · Mobile";
   }
 
@@ -352,7 +374,7 @@
     var b = $("stallBanner");
     if (!stalls.length){ b.style.display="none"; return; }
     b.style.display = "block";
-    $("stallTxt").textContent = (zh?"停滞线体: ":"Stalled: ") + stalls.map(function(l){ return shortName(l.name); }).join("、");
+    $("stallTxt").textContent = (zh?"停滞线体: ":"Stalled: ") + stalls.map(function(l){ return shortName(l.name); }).join(zh?"、":", ");
   }
 
   /* ── 问题点 (live-data.js) ── */
@@ -369,7 +391,7 @@
     $("probSrc").textContent = T("AI分组","AI") + " " + top.length + "/" + problems.length + " · " + period;
     body.innerHTML = '<div class="prob-summary">📋 ' + period + ' · ' + T("共","") + problems.length + T("条 · 累计影响"," items · impact") + ' <b class="prob-imp">-' + Math.abs(totalImpact) + T("台"," pcs") + '</b></div>'
       + top.map(function(item, bi){
-        var bname = (item.lines && item.lines.length) ? String(item.lines.join("、")) : "-";
+        var bname = (item.lines && item.lines.length) ? String(item.lines.join(zh?"、":", ")) : "-";
         var dispName = (!zh && item.name_th) ? item.name_th : (item.name || "");
         var imp = (item.total_impact != null) ? " <b class='prob-imp'>" + (Number(item.total_impact)<=0?"":"+") + Number(item.total_impact) + T("台","") + "</b>" : "";
         var cnt = item.count > 1 ? " · ×" + item.count + T("时段","") : "";
@@ -683,7 +705,10 @@
     $("hourlyLegend").innerHTML = '<span class="lg-act"><i class="dot"></i>' + T("实际","Act") + '</span><span class="lg-pln"><i class="dot"></i>' + T("目标","Plan") + '</span>';
     $("hourlyHint").textContent = zh ? (night
       ? "夜班休息不计时段: 22:30-22:40 · 00:30-01:30 · 次日 07:50-08:00 交班"
-      : "休息不计时段: 10:00-10:10 · 12:00-13:00 午休 · 15:00-15:10 · 17:00-17:20 · 20:20-20:30 交班") : "";
+      : "休息不计时段: 10:00-10:10 · 12:00-13:00 午休 · 15:00-15:10 · 17:00-17:20 · 20:20-20:30 交班")
+      : (night
+      ? "Rests excluded: 22:30-22:40 · 00:30-01:30 · next-day 07:50-08:00"
+      : "Rests excluded: 10:00-10:10 · 12:00-13:00 lunch · 15:00-15:10 · 17:00-17:20 · 20:20-20:30");
     var grid = $("hourlyGrid");
     var html = "";
     var any = false;
@@ -754,6 +779,7 @@
     $("srcLine").textContent = "SRC: " + (state.source || "-") + " · " + (state.mode || "");
   }
   function setConn(ok){
+    connOk = ok;
     var dot = $("connDot"), txt = $("connTxt");
     dot.className = "dot " + (ok?"ok":"bad");
     // 超过 150s 没数据更新 = 上游数据机断推 (电脑关机/网络断) → 明确警示, 不显示虚假"已连接"
