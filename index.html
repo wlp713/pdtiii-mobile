@@ -328,6 +328,7 @@
 
   function renderMain(mains){
     var box = $("mainLines"), h = "";
+    mains = mains.slice().sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
     mains.forEach(function(l, i){
       var e = Number(l.eff), r = Number(l.actual)||0, p = Number(l.plan)||0, cb = Number(l.cb);
       var rc = rateCls(e);
@@ -412,7 +413,7 @@
   /* ── 首小时达成 (live-data.js) ── */
   function renderFirstHour(){
     var ld = window.__LIVE_DATA__ || {};
-    var fh = ld.first_hour || [];
+    var fh = (ld.first_hour || []).slice().sort(function(a,b){ return (Number(b.rate)||-1)-(Number(a.rate)||-1); });
     var sec = $("fhSec"), body = $("fhBody");
     if (!fh.length){ sec.style.display="none"; return; }
     sec.style.display = "block";
