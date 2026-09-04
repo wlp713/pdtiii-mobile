@@ -231,15 +231,19 @@
   var MAIN_SET = {};
   MAIN_LINES.forEach(function(l){ MAIN_SET[normName(l)] = true; });
 
-  // ★ 2026-09-03 车间分类 (与桌面一致, 名称用线上实测名; 未命中车间的线体归入"其它")
+  // ★ 2026-09-04 车间分类 (与桌面 pc 端一致: 按表格七类重新分组; 名称用线上/生产库实测名)
+  //   Pro1=Motor6 / Pro2行1=Rotor+Final8 / Pro2行2=Shipping(=Inspection)4 / Pro3=Welding4
+  //   Pro4行1=Frame No.1-5+Hon/Pist / Pro4行2=Body/Pin / Pro5=Frame/Piston/Cylinder Honing
   var WS_GROUPS = [
-    { ws: "PRO1", lines: ["Motor AC", "Motor CL", "Motor WL", "Motor F-Series", "Motor H-Series", "Motor S-Series"] },
-    { ws: "PRO2", lines: ["Final A line", "Final B Line", "Final C line", "Final D line", "Inspection A", "Inspection B", "Inspection C", "Inspection D", "Water Line", "Rotor A line", "Rotor B Line", "Rotor C line", "Rotor D Line"] },
-    { ws: "PRO3", lines: ["Welding A line", "Welding B line", "Welding C line", "Welding D line", "Press C-Shaft"] },
-    { ws: "PRO4", lines: ["C-Shaft Body A", "C-Shaft Body B", "C-Shaft Pin A", "C-Shaft Pin C", "C-Shft Pin B", "Piston Grinding", "Rod Pispin", "Frame Honing FL"] },
-    { ws: "PRO5", lines: ["Piston honing FL", "Cylinder Honing"] },
-    { ws: "PRO6", lines: [] }
+    { ws: "PRO1",   label: "PRO1",            lines: ["Motor AC", "Motor CL", "Motor WL", "Motor F-Series", "Motor H-Series", "Motor S-Series"] },
+    { ws: "PRO2R",  label: "PRO2·Rotor/Fin",  lines: ["Final A line", "Final B Line", "Final C line", "Final D line", "Rotor A line", "Rotor B Line", "Rotor C line", "Rotor D Line"] },
+    { ws: "PRO2S",  label: "PRO2·Shipping",   lines: ["Inspection A", "Inspection B", "Inspection C", "Inspection D"] },
+    { ws: "PRO3",   label: "PRO3",            lines: ["Welding A line", "Welding B line", "Welding C line", "Welding D line"] },
+    { ws: "PRO4H",  label: "PRO4·Hon/Pist",   lines: ["Frame No.1", "Frame No.2", "Frame No.3", "Frame No.4", "Frame No.5", "Piston Grinding", "Rod Pispin", "Press C-Shaft"] },
+    { ws: "PRO4B",  label: "PRO4·Body/Pin",   lines: ["C-Shaft Body A", "C-Shaft Body B", "C-Shaft Body C", "C-Shaft Pin A", "C-Shft Pin B", "C-Shaft Pin C"] },
+    { ws: "PRO5",   label: "PRO5",            lines: ["Frame Honing FL", "Piston honing FL", "Cylinder Honing"] }
   ];
+  var WS_LABEL = {}; WS_GROUPS.forEach(function(g){ WS_LABEL[g.ws] = g.label; });
   var LINE2WS = {};
   WS_GROUPS.forEach(function(g){ g.lines.forEach(function(ln){ LINE2WS[normName(ln)] = g.ws; }); });
   var wsSel = null;   // null = 主要线体视图 (默认, 与原版一致); 选中后=该车间全部线体
@@ -297,10 +301,11 @@
     lines.forEach(function(l){
       if (MAIN_SET[normName(l.name)]) mains.push(l);
     });
-    renderKpis(mains, lines);
-    // ★ 2026-09-03: 列表视图 = 选车间则全部车间线体(含主线), 否则原主要 8 条
+    // ★ 2026-09-04: 列表视图 = 选车间则全部车间线体(含主线), 否则原主要 8 条
     var view = wsSel ? wsLinesOf(wsSel) : mains;
     renderMain(view, wsSel !== null);
+    // ★ 2026-09-04: KPI/小时图跟随车间 — 车间模式下用该车间线体而非固定 main 8 条
+    renderKpis(view, lines, wsSel !== null);
     updWsChips();
     renderStall(lines);
     renderProblems();
@@ -326,7 +331,7 @@
       var c = document.createElement("div");
       c.className = "chip";
       c.dataset.ws = g.ws;
-      c.innerHTML = g.ws + ' <span class="cnt"></span>';
+      c.innerHTML = esc(g.label) + ' <span class="cnt"></span>';  // ★ 2026-09-04: 显示 label(如 PRO2·Rotor/Fin)
       c.addEventListener("click", function(){ if (c.classList.contains("dim")) return; setWs(wsSel === g.ws ? null : g.ws); });
       box.appendChild(c);
     });
@@ -358,7 +363,7 @@
     var tag = $("wsSelTag");
     if (!tag) return;
     if (wsSel){
-      tag.textContent = wsSel + " · " + wsLinesOf(wsSel).length + " " + T("条","lines");
+      tag.textContent = (WS_LABEL[wsSel]||wsSel) + " · " + wsLinesOf(wsSel).length + " " + T("条","lines");  // ★ 2026-09-04: 用 label
     } else {
       var m = 0;
       (state.lines||[]).forEach(function(l){ if (MAIN_SET[normName(l.name)]) m++; });
@@ -368,7 +373,11 @@
   function setWs(ws){
     wsSel = ws;
     updWsChips();
-    renderMain(wsSel ? wsLinesOf(wsSel) : mainLinesOf(), wsSel !== null);
+    var isWs = wsSel !== null;
+    renderMain(wsSel ? wsLinesOf(wsSel) : mainLinesOf(), isWs);
+    // ★ 2026-09-04: 切车间 → KPI + 小时产出图同步切换 (跟随该车间线体)
+    renderKpis(wsSel ? wsLinesOf(wsSel) : mainLinesOf(), state.lines, isWs);
+    renderHourly();
   }
   function mainLinesOf(){
     var out = [];
@@ -376,26 +385,49 @@
     return out;
   }
 
-  function renderKpis(mains, all){
+  // ★ 2026-09-04: KPI 跟随车间 — wsMode=true(选中车间)时, Eff/Hit 用该车间线体计算,
+  //   Final/Motor 卡切换为「车间累计产出」+「车间计划量」口径(与 pc 端 renderKPIs 同步)
+  function renderKpis(view, all, wsMode){
+    view = view || [];
     var wEff = 0, wPlan = 0;
-    mains.forEach(function(l){
+    view.forEach(function(l){
       var p = Number(l.plan)||0, e = Number(l.eff);
       if (p>0 && !isNaN(e)){ wEff += e*p; wPlan += p; }
     });
     var avg = wPlan>0 ? (wEff/wPlan) : NaN;
     $("kpiEff").textContent = isNaN(avg) ? "-" : avg.toFixed(1)+"%";
     $("kpiEff").className = "val " + (isNaN(avg) ? "" : (avg>=90?"green":(avg>=70?"orange":"red")));
-    var hit = mains.filter(function(l){ return Number(l.eff)>=90; }).length;
-    $("kpiHit").textContent = hit + "/" + mains.length;
+    $("kpiEffSub").textContent = wsMode ? T("车间线体·计划量加权","ws lines · plan-wtd") : T("主要线体·计划量加权","main lines · plan-wtd");
+    var hit = view.filter(function(l){ return Number(l.eff)>=90; }).length;
+    $("kpiHit").textContent = hit + "/" + view.length;
     $("kpiHit").className = "val " + (hit>=6?"green":(hit>=4?"orange":"red"));
-    var fin = 0, mot = 0;
-    mains.forEach(function(l){
-      var n = normName(l.name), v = Number(l.actual)||0;
-      if (n.indexOf("final")===0) fin += v;
-      if (n.indexOf("motor")===0) mot += v;
-    });
-    $("kpiFinal").textContent = fmt(fin);
-    $("kpiMotor").textContent = fmt(mot);
+    // ★ 2026-09-04: 车间模式下副标题显示命中 n/车间线体 n (默认=命中线体名)
+    var hitNames = view.filter(function(l){ return Number(l.eff)>=90; }).map(function(l){ return shortName(l.name); }).join(zh?"、":", ");
+    $("kpiHitSub").textContent = wsMode ? (hit + "/" + view.length) : (hitNames || (zh?"暂无达成线体":"no hit"));
+    if (wsMode){
+      // 车间模式: Final/Motor 卡 → 车间累计产出 + 车间计划量
+      var cumSum = view.reduce(function(s,l){ return s+(Number(l.cum)||0); }, 0);
+      var planSum = view.reduce(function(s,l){ return s+(Number(l.plan)||0); }, 0);
+      $("kpiFinalLb").textContent = T("🔵 车间累计产出","🔵 WS Output");
+      $("kpiFinalSub").textContent = T("全部线体 · 今日累计","all lines · today cum");
+      $("kpiMotorLb").textContent = T("🟠 车间计划量","🟠 WS Plan");
+      $("kpiMotorSub").textContent = T("全部线体 · 今日计划","all lines · today plan");
+      $("kpiFinal").textContent = cumSum ? fmt(cumSum) : "-";
+      $("kpiMotor").textContent = planSum ? fmt(planSum) : "-";
+    } else {
+      var fin = 0, mot = 0;
+      view.forEach(function(l){
+        var n = normName(l.name), v = Number(l.actual)||0;
+        if (n.indexOf("final")===0) fin += v;
+        if (n.indexOf("motor")===0) mot += v;
+      });
+      $("kpiFinalLb").textContent = T("🔵 Final 产量","🔵 Final Qty");
+      $("kpiFinalSub").textContent = T("Final A-D 合计","Final A-D total");
+      $("kpiMotorLb").textContent = T("🟠 Motor 产量","🟠 Motor Qty");
+      $("kpiMotorSub").textContent = T("Motor H/S/F/WL 合计","Motor H/S/F/WL total");
+      $("kpiFinal").textContent = fmt(fin);
+      $("kpiMotor").textContent = fmt(mot);
+    }
   }
 
   function renderMain(mains, wsMode){
@@ -691,6 +723,14 @@
     MAIN_LINES.forEach(function(n){ var l = lineOf(n); if (l) out.push(l); });
     return out;
   }
+  // ★ 2026-09-04: 小时产出跟随车间 — 选中车间(wsSel)时画该车间线体, 未选=主要 8 线 (与 pc 端 viewLines 同步)
+  function hourViewMains(){
+    if (wsSel) {
+      var out = wsLinesOf(wsSel).slice().sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
+      return out;
+    }
+    return hourMains();
+  }
 
   /* ── 8 线宫格小时产出 (v3: 仿桌面双柱纵堆叠, 每卡一图, 无需点选) ── */
   // 桌面参考: 每线两根纵柱 — 左=实际(蓝, 段内灰缺口+蓝达成), 右=目标(橙),
@@ -755,12 +795,15 @@
   function renderHourly(){
     var sec = $("hourlySec");
     if (!sec) return;
-    var mains = hourMains();
+    // ★ 2026-09-04: 跟随车间 — 车间模式下画该车间线体宫格
+    var mains = hourViewMains();
     if (!mains.length){ sec.style.display = "none"; return; }
     sec.style.display = "block";
     var sc = shiftSegAt(bkkMin());
     var night = sc.shift === "night";
-    $("hourlyTag").textContent = (night?T("夜班","Night"):T("白班","Day")) + " · " + T("段","Seg ") + sc.idx;
+    var tagTxt = (night?T("夜班","Night"):T("白班","Day")) + " · " + T("段","Seg ") + sc.idx;
+    if (wsSel) tagTxt = (WS_LABEL[wsSel]||wsSel) + " · " + tagTxt;  // ★ 2026-09-04: 车间模式下标题带车间名
+    $("hourlyTag").textContent = tagTxt;
     $("hourlyLegend").innerHTML = '<span class="lg-act"><i class="dot"></i>' + T("实际","Act") + '</span><span class="lg-pln"><i class="dot"></i>' + T("目标","Plan") + '</span>';
     $("hourlyHint").textContent = zh ? (night
       ? "夜班休息不计时段: 22:30-22:40 · 00:30-01:30 · 次日 07:50-08:00 交班"
