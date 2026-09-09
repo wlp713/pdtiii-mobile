@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PDTIII手机版">
-<title>生产实时看板 · 手机版</title>
+<title>Production Board · Mobile</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -44,8 +44,10 @@
   .h-sub .dot.bad { background:var(--red); box-shadow:0 0 6px var(--red); }
   .lang-btn {
     border:1px solid var(--border); background:var(--panel2); color:var(--white);
-    border-radius:8px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; flex-shrink:0;
+    border-radius:8px; padding:6px 12px; font-size:12px; font-weight:700; cursor:pointer; flex-shrink:0;
+    min-height:38px; -webkit-tap-highlight-color:transparent;
   }
+  .lang-btn:hover { border-color:var(--gray); background:#1c2330; }
   .lang-btn:active { background:#263044; }
 
   /* ── 停滞横幅 ── */
@@ -117,9 +119,13 @@
   .chips { display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; margin-bottom:4px; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
   .chips::-webkit-scrollbar { display:none; }
   .chip {
-    flex-shrink:0; font-size:11px; font-weight:700; padding:4px 11px; border-radius:20px;
+    flex-shrink:0; font-size:11px; font-weight:700; padding:7px 13px; border-radius:20px;
     border:1px solid var(--border); background:var(--panel2); color:var(--gray); cursor:pointer;
+    min-height:36px; display:inline-flex; align-items:center; justify-content:center;
+    -webkit-tap-highlight-color:transparent;
   }
+  .chip:hover:not(.dim) { border-color:var(--gray); color:var(--white); }
+  .chip:active:not(.dim) { background:#263044; }
   .chip.on { background:rgba(88,166,255,.15); border-color:var(--blue); color:var(--blue); }
   .chip.dim { opacity:.38; cursor:not-allowed; }
   .chip .cnt { opacity:.65; font-size:9px; font-weight:600; margin-left:1px; }
@@ -166,22 +172,30 @@
   footer { text-align:center; color:var(--gray); font-size:10.5px; margin-top:16px; line-height:1.8; }
   .refresh-btn {
     border:1px solid var(--border); background:var(--panel2); color:var(--white);
-    border-radius:10px; padding:9px 0; width:100%; font-size:13px; font-weight:700; cursor:pointer; margin-top:10px;
+    border-radius:10px; padding:12px 0; width:100%; font-size:13px; font-weight:700; cursor:pointer; margin-top:10px;
+    min-height:44px; -webkit-tap-highlight-color:transparent;
   }
+  .refresh-btn:hover { border-color:var(--gray); background:#1c2330; }
   .refresh-btn:active { background:#263044; }
   .src-line { margin-top:8px; }
 
   .empty { color:var(--gray); font-size:12px; padding:8px 0; }
+
+  /* ── 触控/动效友好 (2026-09-09): 尊重系统减少动效, 透卡过渡克制 ── */
+  @media (prefers-reduced-motion: reduce){
+    * { transition:none !important; animation:none !important; }
+  }
+  .kpi, .sec, .line-card, .trend-card, .hc-card { transition: border-color .18s ease-out; }
 </style>
 </head>
 <body>
 <header>
   <div class="h-top">
-    <div class="h-title" id="title">🏭 生产实时看板 <small id="modeTag">LIVE</small></div>
-    <button class="lang-btn" id="langBtn">EN</button>
+    <div class="h-title" id="title">🏭 Production Board <small id="modeTag">LIVE</small></div>
+    <button class="lang-btn" id="langBtn">TH</button>
   </div>
   <div class="h-sub">
-    <span><span class="dot" id="connDot"></span><span id="connTxt">连接中…</span></span>
+    <span><span class="dot" id="connDot"></span><span id="connTxt">connecting…</span></span>
     <span id="dateTxt"></span>
     <span id="updTxt" style="margin-left:auto"></span>
   </div>
@@ -191,45 +205,45 @@
   <div class="stall-banner" id="stallBanner">⚠️ <span id="stallTxt"></span></div>
 
   <div class="kpis">
-    <div class="kpi"><div class="lb" id="kpiEffLb">⚡ 平均效率</div><div class="val" id="kpiEff">-</div><div class="sub" id="kpiEffSub">主要线体·计划量加权</div></div>
-    <div class="kpi"><div class="lb" id="kpiHitLb">🏆 达成线体 ≥90%</div><div class="val" id="kpiHit">-</div><div class="sub" id="kpiHitSub">达成 x/8</div></div>
-    <div class="kpi"><div class="lb" id="kpiFinalLb">🔵 Final 产量</div><div class="val blue" id="kpiFinal">-</div><div class="sub" id="kpiFinalSub">Final A-D 合计</div></div>
-    <div class="kpi"><div class="lb" id="kpiMotorLb">🟠 Motor 产量</div><div class="val orange" id="kpiMotor">-</div><div class="sub" id="kpiMotorSub">Motor H/S/F/WL 合计</div></div>
+    <div class="kpi"><div class="lb" id="kpiEffLb">⚡ Avg Eff</div><div class="val" id="kpiEff">-</div><div class="sub" id="kpiEffSub">main lines · plan-wtd</div></div>
+    <div class="kpi"><div class="lb" id="kpiHitLb">🏆 Lines ≥90%</div><div class="val" id="kpiHit">-</div><div class="sub" id="kpiHitSub">hit x/8</div></div>
+    <div class="kpi"><div class="lb" id="kpiFinalLb">🔵 Final Qty</div><div class="val blue" id="kpiFinal">-</div><div class="sub" id="kpiFinalSub">Final A-D total</div></div>
+    <div class="kpi"><div class="lb" id="kpiMotorLb">🟠 Motor Qty</div><div class="val orange" id="kpiMotor">-</div><div class="sub" id="kpiMotorSub">Motor H/S/F/WL total</div></div>
   </div>
 
   <div class="sec">
-    <div class="sec-h" id="secHMain">🏭 线体 <span class="tag" id="wsSelTag"></span></div>
+    <div class="sec-h" id="secHMain">🏭 Lines <span class="tag" id="wsSelTag"></span></div>
     <div class="chips" id="wsChips"></div>
     <div id="mainLines"></div>
   </div>
 
   <div class="sec" id="probSec" style="display:none">
-    <div class="sec-h" id="secHProb">🚨 未达成原因 · 主要问题点 <span class="tag" id="probSrc">-</span></div>
+    <div class="sec-h" id="secHProb">🚨 Miss Reasons · Top Issues <span class="tag" id="probSrc">-</span></div>
     <div id="probBody"></div>
   </div>
 
   <div class="sec" id="fhSec" style="display:none">
-    <div class="sec-h" id="secHFh">⏰ 首小时达成 (8-9点)</div>
+    <div class="sec-h" id="secHFh">⏰ 1st-Hour Target (8-9)</div>
     <div id="fhBody"></div>
   </div>
 
   <div class="sec" id="hourlySec" style="display:none">
-    <div class="sec-h" id="secHHourly">📊 小时产出 <span class="tag" id="hourlyTag">-</span></div>
+    <div class="sec-h" id="secHHourly">📊 Hourly Output <span class="tag" id="hourlyTag">-</span></div>
     <div class="hc-legend" id="hourlyLegend"></div>
     <div class="hc-grid" id="hourlyGrid"></div>
     <div class="hc-hint" id="hourlyHint"></div>
   </div>
 
   <div class="sec">
-    <div class="sec-h" id="secHTrend">📈 达成率趋势 <span class="tag" id="trendTag">近10个工作日</span></div>
+    <div class="sec-h" id="secHTrend">📈 Rate Trend <span class="tag" id="trendTag">last 10 workdays</span></div>
     <div class="chips" id="trendChips"></div>
     <div class="chart-box"><div id="trendChart"></div></div>
   </div>
 
-  <button class="refresh-btn" id="refreshBtn">🔄 手动刷新</button>
+  <button class="refresh-btn" id="refreshBtn">🔄 Refresh</button>
   <footer>
     <div class="src-line" id="srcLine"></div>
-    <div id="footNote">手机版 · 数据每 60 秒自动刷新</div>
+    <div id="footNote">mobile · auto refresh every 60s</div>
   </footer>
 </div>
 
@@ -238,7 +252,39 @@
 <script>
 (function () {
   "use strict";
-  var zh = true;
+  var lang = "en";          // "en" (default) | "th" | "zh"
+  var zh = (lang === "zh"); // legacy alias kept for the many `zh?` branches
+  // 泰语字典: key = 中文文案 (T 第一参 / applyLang 中文文案), value = 泰语
+  var TH = {
+    "主要":"หลัก", "主要 ":"ทั้งหมด ", "条":"สาย", "条线体":" ไลน์", "条 · 累计影响":" รายการ · ผลกระทบรวม",
+    "线体":"ไลน์", "车间":"เวิร์กช็อป", "target":"เป้า",
+    "实际":"จริง", "计划":"แผน", "计划量":"แผนการผลิต", "目标":"เป้าหมาย", "差异":"ผลต่าง",
+    "达成率":"อัตราการสำเร็จ", "平均效率":"ประสิทธิภาพเฉลี่ย", "达成线体 ≥90%":"ไลน์ที่สำเร็จ ≥90%",
+    "最终产量":"ผลผลิต Final", "车间累计产出":"ผลผลิตรวมเวิร์กช็อป", "车间计划量":"แผนรวมเวิร์กช็อป",
+    "全部线体 · 今日累计":"ทุกไลน์ · สะสมวันนี้", "全部线体 · 今日计划":"ทุกไลน์ · แผนวันนี้",
+    "Final 产量":"ผลผลิต Final", "Motor 产量":"ผลผลิต Motor",
+    "Final A-D 合计":"รวม Final A-D", "Motor H/S/F/WL 合计":"รวม Motor H/S/F/WL",
+    "白班":"กะกลางวัน", "夜班":"กะกลางคืน", "段":"ตอนที่ ",
+    "运行":"กำลังทำงาน", "停止":"หยุด", "待机":"รอ",
+    "更新于":"อัปเดตเมื่อ ", "已连接":"เชื่อมต่ออยู่", "数据已停更":"ข้อมูลหยุดอัปเดต", "连接异常":"การเชื่อมต่อผิดปกติ",
+    "暂无数据":"ไม่มีข้อมูล", "暂无进行中时段 (休息/交班)":"ไม่มีช่วงที่กำลังทำงาน (พัก/สลับกะ)",
+    "暂无历史数据":"ไม่มีข้อมูลย้อนหลัง", "该车间暂无历史数据":"ไม่มีข้อมูลย้อนหลังของเวิร์กช็อปนี้", "该线体暂无数据":"ไม่มีข้อมูลของไลน์นี้",
+    "未达成原因 · 主要问题点":"สาเหตุไม่บรรลุ · จุดปัญหาหลัก", "首小时达成 (8-9点)":"เป้าหมายชั่วโมงแรก (8-9)",
+    "小时产出":"ผลผลิตรายชั่วโมง", "达成率趋势":"แนวโน้มอัตราการสำเร็จ", "近10个工作日":"10 วันทำการล่าสุด",
+    "手动刷新":"รีเฟรช", "手机版 · 数据每 60 秒自动刷新":"มือถือ · อัปเดตอัตโนมัติทุก 60 วินาที",
+    "生产实时看板":"กระดานการผลิตแบบเรียลไทม์", "手机版":"มือถือ",
+    "生产实时看板 · 手机版":"กระดานการผลิต · มือถือ", "手机版 ·":"มือถือ ·"
+    ,"全天":"ตลอดวัน", "暂无达成线体":"ไม่มีไลน์ที่สำเร็จ", "第":"ตอนที่ ", "停滞线体: ":"ไลน์ที่หยุดชะงัก: ",
+    "连接中…":"กำลังเชื่อมต่อ…", "达成 x/8":"สำเร็จ x/8", "AI分组":"AI กลุ่ม", "共":"", "台":" ชิ้น", "时段":"ช่วงเวลา",
+    "主要线体·计划量加权":"ไลน์หลัก · ถ่วงน้ำหนักตามแผน", "车间线体·计划量加权":"ไลน์เวิร์กช็อป · ถ่วงน้ำหนักตามแผน",
+    "🔵 Final 产量":"🔵 ผลผลิต Final", "🟠 Motor 产量":"🟠 ผลผลิต Motor",
+    "🔵 车间累计产出":"🔵 ผลผลิตรวมเวิร์กช็อป", "🟠 车间计划量":"🟠 แผนรวมเวิร์กช็อป", " 进行中":" กำลังทำงาน"
+  };
+  function thT(zhTxt){ return TH[zhTxt] || zhTxt; }
+  function tr(zhTxt, enTxt){
+    if (lang === "th") return thT(zhTxt);
+    return zh ? zhTxt : enTxt;
+  }
   var MAIN_LINES = ["Final A line","Final B Line","Final C line","Final D line","Motor H-Series","Motor S-Series","Motor F-Series","Motor WL"];
   function normName(n){ return String(n||"").toLowerCase().replace(/\s+/g,""); }
   var MAIN_SET = {};
@@ -273,31 +319,35 @@
   function fmt1(n){ if(n===null||n===undefined||isNaN(n)) return "-"; return Number(n).toFixed(1); }
   function shortName(n){ return String(n||"").replace(/ line$/i,"").replace(/-Series$/i,"").trim(); }
   function rateCls(r){ if(r===null||r===undefined||isNaN(r)) return ""; return r>=90?"rate-ok":(r>=70?"rate-warn":"rate-bad"); }
-  function T(zhTxt, enTxt){ return zh ? zhTxt : enTxt; }
+  function T(zhTxt, enTxt){ return tr(zhTxt, enTxt); }
 
   /* ── 语言 ── */
   var connOk = null;   // 最近一次连接状态(null=尚未加载完成); 供切语言后重放
+  // 语言按钮文案: 显示「下一个目标语言」(en→th→zh→en)
+  var LANG_NEXT = { en:"TH", th:"中", zh:"EN" };
   function applyLang(){
-    $("title").innerHTML = (zh?"🏭 生产实时看板":"🏭 Production Board") + " <small>" + (zh?"手机版":"MOBILE") + "</small>";
-    $("langBtn").textContent = zh ? "EN" : "中";
-    if (connOk === null) $("connTxt").textContent = zh ? "连接中…" : "connecting…"; else setConn(connOk);
-    $("kpiHitSub").textContent = zh ? "达成 x/8" : "hit x/8";
-    $("kpiEffLb").textContent = zh ? "⚡ 平均效率" : "⚡ Avg Eff";
-    $("kpiEffSub").textContent = zh ? "主要线体·计划量加权" : "main lines · plan-wtd";
-    $("kpiHitLb").textContent = zh ? "🏆 达成线体 ≥90%" : "🏆 Lines ≥90%";
-    $("kpiFinalLb").textContent = zh ? "🔵 Final 产量" : "🔵 Final Qty";
-    $("kpiFinalSub").textContent = zh ? "Final A-D 合计" : "Final A-D total";
-    $("kpiMotorLb").textContent = zh ? "🟠 Motor 产量" : "🟠 Motor Qty";
-    $("kpiMotorSub").textContent = zh ? "Motor H/S/F/WL 合计" : "Motor H/S/F/WL total";
+    zh = (lang === "zh");
+    document.documentElement.lang = (lang === "zh") ? "zh-CN" : (lang === "th" ? "th" : "en");
+    $("title").innerHTML = (lang==="th" ? tr("生产实时看板","🏭 Production Board") : (zh?"🏭 生产实时看板":"🏭 Production Board")) + " <small>" + tr("手机版","MOBILE") + "</small>";
+    $("langBtn").textContent = LANG_NEXT[lang] || "EN";
+    if (connOk === null) $("connTxt").textContent = tr("连接中…","connecting…"); else setConn(connOk);
+    $("kpiHitSub").textContent = tr("达成 x/8","hit x/8");
+    $("kpiEffLb").textContent = "⚡ " + tr("平均效率","Avg Eff");
+    $("kpiEffSub").textContent = tr("主要线体·计划量加权","main lines · plan-wtd");
+    $("kpiHitLb").textContent = "🏆 " + tr("达成线体 ≥90%","Lines ≥90%");
+    $("kpiFinalLb").textContent = "🔵 " + tr("Final 产量","Final Qty");
+    $("kpiFinalSub").textContent = tr("Final A-D 合计","Final A-D total");
+    $("kpiMotorLb").textContent = "🟠 " + tr("Motor 产量","Motor Qty");
+    $("kpiMotorSub").textContent = tr("Motor H/S/F/WL 合计","Motor H/S/F/WL total");
     updSecHMain();
-    $("secHProb").innerHTML = (zh?"🚨 未达成原因 · 主要问题点":"🚨 Miss Reasons · Top Issues") + ' <span class="tag" id="probSrc">-</span>';
-    $("secHFh").textContent = zh ? "⏰ 首小时达成 (8-9点)" : "⏰ 1st-Hour Target (8-9)";
-    $("secHTrend").innerHTML = (zh?"📈 达成率趋势":"📈 Rate Trend") + ' <span class="tag" id="trendTag">近10个工作日</span>';
-    $("trendTag").textContent = zh ? "近10个工作日" : "last 10 workdays";
-    $("secHHourly").innerHTML = (zh?"📊 小时产出":"📊 Hourly Output") + ' <span class="tag" id="hourlyTag">-</span>';
-    $("refreshBtn").textContent = zh ? "🔄 手动刷新" : "🔄 Refresh";
-    $("footNote").textContent = zh ? "手机版 · 数据每 60 秒自动刷新" : "mobile · auto refresh every 60s";
-    document.title = zh ? "生产实时看板 · 手机版" : "Production Board · Mobile";
+    $("secHProb").innerHTML = (lang==="th"?tr("未达成原因 · 主要问题点","🚨 Miss Reasons · Top Issues"):(zh?"🚨 未达成原因 · 主要问题点":"🚨 Miss Reasons · Top Issues")) + ' <span class="tag" id="probSrc">-</span>';
+    $("secHFh").textContent = (lang==="th"?tr("首小时达成 (8-9点)","⏰ 1st-Hour Target (8-9)"):(zh?"⏰ 首小时达成 (8-9点)":"⏰ 1st-Hour Target (8-9)"));
+    $("secHTrend").innerHTML = (lang==="th"?tr("达成率趋势","📈 Rate Trend"):(zh?"📈 达成率趋势":"📈 Rate Trend")) + ' <span class="tag" id="trendTag">' + tr("近10个工作日","last 10 workdays") + '</span>';
+    $("trendTag").textContent = tr("近10个工作日","last 10 workdays");
+    $("secHHourly").innerHTML = (lang==="th"?tr("小时产出","📊 Hourly Output"):(zh?"📊 小时产出":"📊 Hourly Output")) + ' <span class="tag" id="hourlyTag">-</span>';
+    $("refreshBtn").textContent = "🔄 " + tr("手动刷新","Refresh");
+    $("footNote").textContent = tr("手机版 · 数据每 60 秒自动刷新","mobile · auto refresh every 60s");
+    document.title = tr("生产实时看板 · 手机版","Production Board · Mobile");
   }
 
   /* ── 主数据拉取 (Firebase) ── */
@@ -416,8 +466,8 @@
     $("kpiHit").textContent = hit + "/" + view.length;
     $("kpiHit").className = "val " + (hit>=6?"green":(hit>=4?"orange":"red"));
     // ★ 2026-09-04: 车间模式下副标题显示命中 n/车间线体 n (默认=命中线体名)
-    var hitNames = view.filter(function(l){ return Number(l.eff)>=90; }).map(function(l){ return shortName(l.name); }).join(zh?"、":", ");
-    $("kpiHitSub").textContent = wsMode ? (hit + "/" + view.length) : (hitNames || (zh?"暂无达成线体":"no hit"));
+    var hitNames = view.filter(function(l){ return Number(l.eff)>=90; }).map(function(l){ return shortName(l.name); }).join((lang==="zh")?"、":", ");
+    $("kpiHitSub").textContent = wsMode ? (hit + "/" + view.length) : (hitNames || tr("暂无达成线体","no hit"));
     if (wsMode){
       // 车间模式: Final/Motor 卡 → 车间累计产出 + 车间计划量
       var cumSum = view.reduce(function(s,l){ return s+(Number(l.cum)||0); }, 0);
@@ -459,9 +509,9 @@
       var barCls = e>=90?"ok":(e>=70?"warn":"bad");
       var st = String(l.status||"").toUpperCase();
       var stCls = "st-idle", stTxt = l.status || "-";
-      if (st.indexOf("RUN")>=0){ stCls="st-run"; stTxt = zh?"运行":"RUN"; }
-      else if (st.indexOf("STOP")>=0 || st.indexOf("DOWN")>=0){ stCls="st-stop"; stTxt = zh?"停止":"STOP"; }
-      else if (st.indexOf("IDLE")>=0){ stCls="st-idle"; stTxt = zh?"待机":"IDLE"; }
+      if (st.indexOf("RUN")>=0){ stCls="st-run"; stTxt = tr("运行","RUN"); }
+      else if (st.indexOf("STOP")>=0 || st.indexOf("DOWN")>=0){ stCls="st-stop"; stTxt = tr("停止","STOP"); }
+      else if (st.indexOf("IDLE")>=0){ stCls="st-idle"; stTxt = tr("待机","IDLE"); }
       var cbHtml = isNaN(cb) ? "-" : ((cb<0?"":"+") + fmt(cb));
       var cbCls = isNaN(cb) ? "" : (cb<0?"neg":"pos");
       h += '<div class="line-card">'
@@ -483,7 +533,7 @@
     var b = $("stallBanner");
     if (!stalls.length){ b.style.display="none"; return; }
     b.style.display = "block";
-    $("stallTxt").textContent = (zh?"停滞线体: ":"Stalled: ") + stalls.map(function(l){ return shortName(l.name); }).join(zh?"、":", ");
+    $("stallTxt").textContent = tr("停滞线体: ","Stalled: ") + stalls.map(function(l){ return shortName(l.name); }).join((lang==="zh")?"、":", ");
   }
 
   /* ── 问题点 (live-data.js) ── */
@@ -496,11 +546,11 @@
     sec.style.display = "block";
     var totalImpact = problems.reduce(function(s,p){ return s + (Number(p.impact)||0); }, 0);
     var times = problems.map(function(p){ return Number(p.time); }).filter(function(t){ return !isNaN(t); }).sort(function(a,b){ return a-b; });
-    var period = times.length ? (fmtTime(times[0]) + " ~ " + fmtTime(times[times.length-1])) : (zh?"全天":"all day");
+    var period = times.length ? (fmtTime(times[0]) + " ~ " + fmtTime(times[times.length-1])) : tr("全天","all day");
     $("probSrc").textContent = T("AI分组","AI") + " " + top.length + "/" + problems.length + " · " + period;
     body.innerHTML = '<div class="prob-summary">📋 ' + period + ' · ' + T("共","") + problems.length + T("条 · 累计影响"," items · impact") + ' <b class="prob-imp">-' + Math.abs(totalImpact) + T("台"," pcs") + '</b></div>'
       + top.map(function(item, bi){
-        var bname = (item.lines && item.lines.length) ? String(item.lines.join(zh?"、":", ")) : "-";
+        var bname = (item.lines && item.lines.length) ? String(item.lines.join((lang==="zh")?"、":", ")) : "-";
         var dispName = (!zh && item.name_th) ? item.name_th : (item.name || "");
         var imp = (item.total_impact != null) ? " <b class='prob-imp'>" + (Number(item.total_impact)<=0?"":"+") + Number(item.total_impact) + T("台","") + "</b>" : "";
         var cnt = item.count > 1 ? " · ×" + item.count + T("时段","") : "";
@@ -857,7 +907,7 @@
   function hcSubLine(segs){
     if (!segs.length) return '';
     var dv = segs[segs.length-1];
-    return (zh?'第':'Seg ')+dv.lab+' · '+fmtSegMin(dv.t0)+'-'+fmtSegMin(dv.t1)+(dv.live?(zh?' 进行中':' live'):'');
+    return tr("第","Seg ")+dv.lab+' · '+fmtSegMin(dv.t0)+'-'+fmtSegMin(dv.t1)+(dv.live?tr(" 进行中"," live"):'');
   }
 
   function renderHourly(){
@@ -1001,7 +1051,8 @@
 
   /* ── 初始化 ── */
   $("langBtn").addEventListener("click", function(){
-    zh = !zh;
+    lang = (lang === "en") ? "th" : (lang === "th" ? "zh" : "en");
+    zh = (lang === "zh");
     applyLang();
     render();
   });
