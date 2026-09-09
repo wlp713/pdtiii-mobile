@@ -956,13 +956,23 @@
     lineDetailBox.classList.add("on");
     document.body.style.overflow = "hidden";
     renderLineDetail();
+    // 压入历史栈 → 系统返回方式(Android back / edge-swipe / iOS 左滑)触发 popstate 自动关闭
+    try{ history.pushState({ldDetail:name}, ""); }catch(e){}
   }
-  function closeLineDetail(){
+  function teardownLineDetail(){
     ldName = null;
     var box = $("lineDetail");
     if (box) box.classList.remove("on");
     document.body.style.overflow = "";
   }
+  // 返回按钮/手势统一入口：若栈顶是分析视图则回退触发 popstate；否则直接关闭
+  function closeLineDetail(){
+    if (ldName && history.state && history.state.ldDetail){
+      try{ history.back(); }catch(e){ teardownLineDetail(); }
+    } else teardownLineDetail();
+  }
+  // 系统返回(Android back / edge-swipe / iOS swipe-back) → popstate → 关闭
+  window.addEventListener("popstate", function(){ teardownLineDetail(); });
   function wsOfVisibleLine(name){
     var nm = normName(name); if (nm==="") return "";
     for (var i=0;i<WS_GROUPS.length;i++){
