@@ -1103,6 +1103,65 @@
     return null;
   }
   function shiftSegAt(mins){ var s=segFor(mins); if (s) return s; return {shift:"day",idx:1,t0:8*60,t1:DAY_SEGS[0][1]}; }
+
+  // ★ 2026-09-09 手动目标覆盖（同步电脑端）：仅 Motor H-Series 一条线
+  //   正常工作时间目标钉死 1800；加班目标按同样速率继续推移。覆盖 plan/target/eff/cb。
+  //   口径: 目标在加班起点(白班17:20/夜班5:50)正好推到 1800, 之后按 pace 继续累加。
+  //   注: 手机端 normName 只去空格(同电脑端早上线前的定义), "Motor H-Series"→"motorhseries"命中。
+  var H_MANUAL_TARGET = 1800;
+  var OT_DAY_START = 17*60+20;                 // 白班加班起点 17:20
+  var OT_NIGHT_START = 5*60+50+1440;           // 夜班加班起点 5:50 (跨天基准)
+  function isManualHLine(name){
+    var m = normName(name);
+    return m === "motorhseries" || m === "motorh-series";
+  }
+  function hManualNormalMins(shift){
+    var table = shift === "night" ? NIGHT_SEGS : DAY_SEGS;
+    var otStart = shift === "night" ? OT_NIGHT_START : OT_DAY_START;
+    var m = 0;
+    for (var i=0;i<table.length;i++){
+      var t0=table[i][0], t1=table[i][1];
+      if (t0>=otStart) break;
+      m += Math.min(t1,otStart)-t0;
+    }
+    return m;
+  }
+  function hManualPlanAt(shift, t){
+    var table = shift === "night" ? NIGHT_SEGS : DAY_SEGS;
+    var otStart = shift === "night" ? OT_NIGHT_START : OT_DAY_START;
+    var nm = hManualNormalMins(shift) || 1;
+    var pace = H_MANUAL_TARGET / nm;
+    var cum = 0;
+    for (var i=0;i<table.length;i++){
+      var t0=table[i][0], t1=table[i][1];
+      if (t0>=otStart) break;
+      var nEnd = Math.min(t, t1, otStart);
+      if (nEnd>t0) cum += (nEnd-t0)*pace;
+    }
+    var ot = 0;
+    for (var i=0;i<table.length;i++){
+      var t0=table[i][0], t1=table[i][1];
+      if (t1<=otStart) continue;
+      if (t0>=t) break;
+      var oEnd = Math.min(t, t1);
+      var oStart = Math.max(t0, otStart);
+      if (oEnd>oStart) ot += (oEnd-oStart)*pace;
+    }
+    return Math.round(cum+ot);
+  }
+  // 对单条 line 应用手动覆盖（同步电脑端 loadMain 的做法）：锁定 target=1800、plan=实时累计手目标、eff/cb 重算
+  function applyManualHLine(l){
+    if (!isManualHLine(l.name)) return;
+    var sc = shiftSegAt(bkkMin());
+    var isNight = sc.shift === "night";
+    var nowM = (isNight && bkkMin()<NIGHT_END) ? bkkMin()+1440 : bkkMin();
+    var mp = hManualPlanAt(sc.shift, nowM);
+    l.target = H_MANUAL_TARGET;
+    l.plan = mp;
+    var a = Number(l.actual)||0;
+    l.eff = mp>0 ? Math.round(a/mp*1000)/10 : (l.eff==null?null:l.eff);
+    l.cb = a - mp;
+  }
   function fmtSegMin(m){ var x=((m%1440)+1440)%1440; return ("0"+Math.floor(x/60)).slice(-2)+":"+("0"+(x%60)).slice(-2); }
   // 快照桶 h 解析: 后端 sync_db 存 HHMM 转 int (前导零丢失: 00:10→10, 08:10→810)
   //   h>=100 → HHMM (前2-3位=时, 后2位=分); h<100 只可能是 00:xx 凌晨桶 → 分钟即自身
@@ -1404,6 +1463,8 @@
     fetchJSON(DATA_URL).then(function(d){
       if (d && d.lines){
         state.lines = d.lines;
+        // ★ 2026-09-09 手动目标覆盖（同步电脑端）：仅 H-Series 锁定 target=1800、plan=手工曲线、eff/cb 重算
+        (state.lines||[]).forEach(function(l){ applyManualHLine(l); });
         state.hourly = d.hourly || {};
         state.updatedAt = d.updatedAt || null;
         state.source = d.source || "";
