@@ -476,7 +476,7 @@
       <div class="ld-stat"><div class="lb" id="ldStatEffLb">Eff</div><div class="val" id="ldStatEff">-</div><div class="sub" id="ldStatEffSub">-</div></div>
       <div class="ld-stat"><div class="lb" id="ldStatActLb">Actual</div><div class="val blue" id="ldStatAct">-</div><div class="sub" id="ldStatActSub">today</div></div>
       <div class="ld-stat"><div class="lb" id="ldStatPlanLb">Plan</div><div class="val orange" id="ldStatPlan">-</div><div class="sub" id="ldStatPlanSub">today</div></div>
-      <div class="ld-stat"><div class="lb" id="ldStatCumLb">Cum</div><div class="val" id="ldStatCum">-</div><div class="sub" id="ldStatCumSub">-</div></div>
+      <div class="ld-stat"><div class="lb" id="ldStatDiffLb">Diff</div><div class="val" id="ldStatDiff">-</div><div class="sub" id="ldStatDiffSub">-</div></div>
     </div>
     <div class="sec">
       <div class="sec-h"><span class="ld-segs-eyebrow" id="ldSegsEyebrow">Hourly segments</span> <span class="tag" id="ldSegsTag">day</span></div>
@@ -1015,9 +1015,11 @@
     $("ldStatPlan").textContent = fmt(plan);
     $("ldStatPlanLb").textContent = zh?"计划":(lang==="th"?"แผน":"Plan");
     $("ldStatPlanSub").textContent = tr("今日","today");
-    $("ldStatCum").textContent = fmt(cum);
-    $("ldStatCumLb").textContent = zh?"累计":(lang==="th"?"สะสม":"Cum");
-    $("ldStatCumSub").textContent = tr("本班累计","shift cum");
+    var diff = act - plan;
+    $("ldStatDiff").textContent = (diff>=0?"+":"") + fmt(Math.abs(diff));
+    $("ldStatDiff").className = "val " + (diff<0?"red":(diff>0?"green":"gray"));
+    $("ldStatDiffLb").textContent = zh?"差异":(lang==="th"?"ผลต่าง":"Diff");
+    $("ldStatDiffSub").textContent = tr("实际-计划","actual − plan");
     $("ldLiveTxt").textContent = tr("实时","LIVE");
     // 逐段产出 (同小时图口径)
     var sc = shiftSegAt(bkkMin());
