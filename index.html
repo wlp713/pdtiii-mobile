@@ -486,6 +486,10 @@
       <div class="sec-h" id="ldSecHx">📈 <span id="ldTrendEyebrow">Rate trend</span> <span class="tag" id="ldTrendTag">last 10 workdays</span></div>
       <div class="chart-box"><div id="ldTrendChart"></div></div>
     </div>
+    <div class="sec">
+      <div class="sec-h" id="ldFhHx">⏰ <span id="ldFhEyebrow">First-hour trend</span> <span class="tag" id="ldFhTag">day</span></div>
+      <div class="chart-box"><div id="ldFhChart"></div></div>
+    </div>
   </div>
 </div>
 
@@ -901,10 +905,11 @@
     drawTrendChart(box, hist, trendSel);
   }
   // 可复用的趋势 SVG (主要模式与车间卡片共用); 无数据返回空串
-  function trendSVG(hist, name, W, H){
+  function trendSVG(hist, name, W, H, field){
+    var f = field || "lines";
     var padL = (W < 220) ? 24 : 30, padR = 8, padT = 10, padB = 20;
     var sc = W >= 260 ? 1 : Math.max(0.62, W/260);  // 小卡字号按宽度缩放
-    var pts = hist.map(function(d){ return { date: d.date, v: Number((d.lines||{})[name]) }; }).filter(function(p){ return !isNaN(p.v); });
+    var pts = hist.map(function(d){ return { date: d.date, v: Number((d[f]||{})[name]) }; }).filter(function(p){ return !isNaN(p.v); });
     if (!pts.length) return "";
     var min = 0, max = Math.max.apply(null, pts.map(function(p){ return p.v; }));
     max = Math.max(60, Math.ceil(max/20)*20);
@@ -1061,6 +1066,20 @@
       box.innerHTML = '<div class="chart-empty">' + T("该线体暂无历史数据","No history for this line") + '</div>';
     } else {
       drawTrendChart(box, hist, key);
+    }
+
+    // 首小时达成趋势 (first_hour 历史: {date, first_hour:{线名:率}})
+    $("ldFhEyebrow").textContent = tr("首小时达成趋势","First-hour trend");
+    $("ldFhTag").textContent = (night?T("夜班","Night"):T("白班","Day"));
+    var fhKeys = {};
+    hist.forEach(function(d){ Object.keys(d.first_hour||{}).forEach(function(k){ fhKeys[normName(k)] = k; }); });
+    var fhKey = fhKeys[normName(l.name)] || null;
+    var fhBox = $("ldFhChart");
+    var fhSvg = fhKey ? trendSVG(hist, fhKey, 340, 140, "first_hour") : "";
+    if (!fhSvg){
+      fhBox.innerHTML = '<div class="chart-empty">' + T("暂无首小时历史","No first-hour history") + '</div>';
+    } else {
+      fhBox.innerHTML = fhSvg;
     }
   }
 
