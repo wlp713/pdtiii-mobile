@@ -747,8 +747,8 @@
     view = view || [];
     // ★ 改动B: PRO2 只算 Final 成品线(Rotor 前道整组排除) — 其它车间全部线体
     if (wsSel === "PRO2R") view = view.filter(function(l){ return FINAL_SET[normName(l.name)]; });
-    // ★ 改动C: 停线(计划停机/停滞/约30min无产出)剔除综合达成率+综合计划
-    var elig = view.filter(function(l){ return !isStoppedRun(l); });
+    // ★ 改动C(2026-09-10): actual=0=没生产 → 剔除综合达成率+WS Plan(简单粗暴, 不再用 isStoppedRun)
+    var elig = view.filter(function(l){ return (Number(l.actual)||0) > 0; });
     var wEff = 0, wPlan = 0;
     elig.forEach(function(l){
       var p = Number(l.plan)||0, e = Number(l.eff);
