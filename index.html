@@ -151,6 +151,8 @@
   .sec-h .tag { margin-left:auto; font-size:10px; color:var(--gray); font-weight:700; background:var(--panel-solid); padding:3px 8px; border-radius:20px; border:1px solid var(--border); white-space:nowrap; letter-spacing:.3px; }
 
   /* ── 线体卡片 (可点按反馈) ── */
+  .pro2-sub { margin: 12px 4px 6px; padding: 4px 10px; border-left: 3px solid #5a8cf0; background: rgba(90,140,240,.10); color: #5a8cf0; font-size: 12px; font-weight: 800; border-radius: 4px; }
+  .pro2-sub:first-child { margin-top: 2px; }
   .line-card {
     background: var(--panel2);
     border:1px solid var(--border); border-radius:var(--radius-sm);
@@ -559,6 +561,49 @@
 
   var state = { lines: [], updatedAt: null, hourly: {} };
 
+  // ★ 2026-09-10 改动C: 停滞跟踪 — 记录每条线 actual 最后变化时间(localStorage 持久化, 刷新/重连不丢)
+  var _stallKey = "pdtiii_stall_map_v1";
+  var _stallStore = null;
+  function _loadStallStore(){
+    if (_stallStore) return;
+    try { _stallStore = JSON.parse(localStorage.getItem(_stallKey) || "{}") || {}; } catch(e){ _stallStore = {}; }
+  }
+  function _saveStallStore(){ try { localStorage.setItem(_stallKey, JSON.stringify(_stallStore)); } catch(e){ /* ignore */ } }
+  function trackStallStart(){
+    _loadStallStore();
+    var now = Date.now(), changed = false;
+    (state.lines||[]).forEach(function(l){
+      var k = normName(l.name);
+      var a = Number(l.actual) || 0;
+      var rec = _stallStore[k];
+      if (!rec || isNaN(rec.a) || Math.abs(a - rec.a) >= 0.5){
+        _stallStore[k] = { a: a, ts: now };
+        changed = true;
+      }
+    });
+    if (changed) _saveStallStore();
+  }
+  function stallMinutesOf(l){
+    _loadStallStore();
+    var rec = _stallStore[normName(l.name)];
+    if (!rec || !rec.ts) return 0;
+    return Math.max(0, Math.floor((Date.now() - rec.ts) / 60000));
+  }
+  function isStalledLine(l){ return l.stalled === true || String(l.status||"").toUpperCase() === "STALLED"; }
+  // ★ 改动C: 停线判定 — 计划停机 / server停滞标记 / 约30min实际产出无变化 → 从综合达成率+综合计划剔除(不标停机)
+  function isStoppedRun(l){
+    if (isPlannedOff(l)) return true;
+    if (isStalledLine(l)) return true;
+    if (stallMinutesOf(l) >= 30) return true;
+    return false;
+  }
+  function isPlannedOff(l){
+    var s = String(l.status||"").toUpperCase();
+    return s.indexOf("PLAN")>=0 || s.indexOf("OFF")>=0 || s === "STOP";
+  }
+  var FINAL_SET = {};
+  ["final a line","final b line","final c line","final d line"].forEach(function(x){ FINAL_SET[normName(x)] = true; });
+
   function $(id){ return document.getElementById(id); }
   function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function fmt(n){ if(n===null||n===undefined||isNaN(n)) return "-"; return Number(n).toLocaleString("en-US"); }
@@ -700,29 +745,34 @@
   //   Final/Motor 卡切换为「车间累计产出」+「车间计划量」口径(与 pc 端 renderKPIs 同步)
   function renderKpis(view, all, wsMode){
     view = view || [];
+    // ★ 改动B: PRO2 只算 Final 成品线(Rotor 前道整组排除) — 其它车间全部线体
+    if (wsSel === "PRO2R") view = view.filter(function(l){ return FINAL_SET[normName(l.name)]; });
+    // ★ 改动C: 停线(计划停机/停滞/约30min无产出)剔除综合达成率+综合计划
+    var elig = view.filter(function(l){ return !isStoppedRun(l); });
     var wEff = 0, wPlan = 0;
-    view.forEach(function(l){
+    elig.forEach(function(l){
       var p = Number(l.plan)||0, e = Number(l.eff);
       if (p>0 && !isNaN(e)){ wEff += e*p; wPlan += p; }
     });
     var avg = wPlan>0 ? (wEff/wPlan) : NaN;
     $("kpiEff").textContent = isNaN(avg) ? "-" : avg.toFixed(1)+"%";
     $("kpiEff").className = "val " + (isNaN(avg) ? "" : (avg>=90?"green":(avg>=70?"orange":"red")));
-    $("kpiEffSub").textContent = wsMode ? T("车间线体·计划量加权","ws lines · plan-wtd") : T("主要线体·计划量加权","main lines · plan-wtd");
-    var hit = view.filter(function(l){ return Number(l.eff)>=90; }).length;
-    $("kpiHit").textContent = hit + "/" + view.length;
-    $("kpiHit").className = "val " + (hit>=6?"green":(hit>=4?"orange":"red"));
+    $("kpiEffSub").textContent = wsMode ? T("车间线体·计划量加权(排除停线)","ws lines · plan-wtd (excl. stopped)") : T("主要线体·计划量加权(排除停线)","main lines · plan-wtd (excl. stopped)");
+    var eligRun = elig.filter(function(l){ var s=String(l.status||"").toUpperCase(); return s.indexOf("RUN")>=0; });
+    var hitNum = eligRun.filter(function(l){ return Number(l.eff)>=90; }).length;
+    $("kpiHit").textContent = hitNum + "/" + eligRun.length;
+    $("kpiHit").className = "val " + (hitNum>=Math.ceil(eligRun.length*0.6)?"green":(hitNum>=Math.ceil(eligRun.length*0.4)?"orange":"red"));
     // ★ 2026-09-04: 车间模式下副标题显示命中 n/车间线体 n (默认=命中线体名)
-    var hitNames = view.filter(function(l){ return Number(l.eff)>=90; }).map(function(l){ return shortName(l.name); }).join((lang==="zh")?"、":", ");
-    $("kpiHitSub").textContent = wsMode ? (hit + "/" + view.length) : (hitNames || tr("暂无达成线体","no hit"));
+    var hitNames = eligRun.filter(function(l){ return Number(l.eff)>=90; }).map(function(l){ return shortName(l.name); }).join((lang==="zh")?"、":", ");
+    $("kpiHitSub").textContent = wsMode ? (hitNum + "/" + eligRun.length) : (hitNames || tr("暂无达成线体","no hit"));
     if (wsMode){
-      // 车间模式: Final/Motor 卡 → 车间累计产出 + 车间计划量
-      var cumSum = view.reduce(function(s,l){ return s+(Number(l.cum)||0); }, 0);
-      var planSum = view.reduce(function(s,l){ return s+(Number(l.plan)||0); }, 0);
+      // 车间模式: Final/Motor 卡 → 车间累计产出 + 车间计划量 (★ B: 仅 Final 且 ★ C: 非停线)
+      var cumSum = elig.reduce(function(s,l){ return s+(Number(l.cum)||0); }, 0);
+      var planSum = elig.reduce(function(s,l){ return s+(Number(l.plan)||0); }, 0);
       $("kpiFinalLb").textContent = T("🔵 车间累计产出","🔵 WS Output");
-      $("kpiFinalSub").textContent = T("全部线体 · 今日累计","all lines · today cum");
+      $("kpiFinalSub").textContent = T((wsSel==="PRO2R"?"Final 线 · 今日累计":"全部线体 · 今日累计"),"today cum");
       $("kpiMotorLb").textContent = T("🟠 车间计划量","🟠 WS Plan");
-      $("kpiMotorSub").textContent = T("全部线体 · 今日计划","all lines · today plan");
+      $("kpiMotorSub").textContent = T((wsSel==="PRO2R"?"Final 线 · 今日计划":"全部线体 · 今日计划"),"today plan");
       $("kpiFinal").textContent = cumSum ? fmt(cumSum) : "-";
       $("kpiMotor").textContent = planSum ? fmt(planSum) : "-";
     } else {
@@ -748,13 +798,24 @@
 
   function renderMain(mains, wsMode){
     var box = $("mainLines"), h = "";
-    mains = (mains||[]).slice().sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
+    mains = (mains||[]).slice();
+    // ★ 2026-09-10 改动A: PRO2R 分组渲染 — Final(成品)上 / Rotor(前道)下, 各带子标题, 组内按效率排序
+    var x1 = null, x2 = null;
     if (!mains.length){
       // 空车间/无数据: 给空态提示(桌面同步口径)
       box.innerHTML = '<div style="text-align:center;color:#8b949e;padding:26px 0;font-size:13px">' + esc(wsMode ? (wsSel + " · " + T("暂无数据","no data")) : T("暂无数据","no data")) + '</div>';
       return;
     }
-    mains.forEach(function(l, i){
+    if (wsSel === "PRO2R"){
+      x1 = mains.filter(function(l){ return FINAL_SET[normName(l.name)]; });
+      x2 = mains.filter(function(l){ return !FINAL_SET[normName(l.name)]; });
+      x1.sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
+      x2.sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
+      mains = [];
+    } else {
+      mains.sort(function(a,b){ return (Number(b.eff)||-1)-(Number(a.eff)||-1); });
+    }
+    function cardHtml(l, i){
       var e = Number(l.eff), r = Number(l.actual)||0, p = Number(l.plan)||0, cb = Number(l.cb);
       var rc = rateCls(e);
       var pct = p>0 ? Math.min(100, Math.max(0, r/p*100)) : 0;
@@ -766,7 +827,7 @@
       else if (st.indexOf("IDLE")>=0){ stCls="st-idle"; stTxt = tr("待机","IDLE"); }
       var cbHtml = isNaN(cb) ? "-" : ((cb<0?"":"+") + fmt(cb));
       var cbCls = isNaN(cb) ? "" : (cb<0?"neg":"pos");
-      h += '<div class="line-card" data-line="'+esc(l.name)+'">'
+      return '<div class="line-card" data-line="'+esc(l.name)+'">'
         + '<div class="lc-top"><div class="lc-name">' + esc(shortName(l.name)) + '</div>'
         + '<span class="lc-status ' + stCls + '">' + stTxt + '</span>'
         + '<div class="lc-rate ' + rc + '">' + (isNaN(e)?"-":e.toFixed(1)+"%") + '</div></div>'
@@ -775,7 +836,20 @@
         + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span></div>'
         + '<div class="bar"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
         + '</div>';
-    });
+    }
+    if (x1 && x2){
+      function sub(key){
+        return zh
+          ? ((key==="Final")?"Final（成品线）":"Router（前道线）")
+          : ((key==="Final")?"Final (finished)":"Router (predecessor)");
+      }
+      h += '<div class="pro2-sub">' + esc(sub("Final")) + '</div>';
+      x1.forEach(function(l,i){ h += cardHtml(l, i); });
+      h += '<div class="pro2-sub">' + esc(sub("Rotor")) + '</div>';
+      x2.forEach(function(l,i){ h += cardHtml(l, x1.length + i); });
+    } else {
+      mains.forEach(function(l, i){ h += cardHtml(l, i); });
+    }
     box.innerHTML = h;
   }
 
@@ -1475,6 +1549,8 @@
         state.source = d.source || "";
         state.mode = d.mode || "";
         setConn(true);
+        // ★ 2026-09-10 改动C: 数据到位后更新停滞时间戳(需在 render 前)
+        try { trackStallStart(); } catch(e){}
         // sampleNow(); // ★ v6.3 停用: 浏览器采样不再参与小时图分段(见 hValueAt/segHasData)
         render();
       } else {
