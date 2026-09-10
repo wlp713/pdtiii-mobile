@@ -839,9 +839,7 @@
     }
     if (x1 && x2){
       function sub(key){
-        return zh
-          ? ((key==="Final")?"Final（成品线）":"Router（前道线）")
-          : ((key==="Final")?"Final (finished)":"Router (predecessor)");
+        return (key==="Final")?"Final":"Rotor";
       }
       h += '<div class="pro2-sub">' + esc(sub("Final")) + '</div>';
       x1.forEach(function(l,i){ h += cardHtml(l, i); });
