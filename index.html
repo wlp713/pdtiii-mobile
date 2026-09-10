@@ -1221,9 +1221,14 @@
     var snaps = (state.hourly||{})[hourlyKeyOf(name)] || [];
     if (snaps.length){
       var pts = [];
-      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; pts.push({ m:snapMins(sn), v:usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0) }); }
+      // ★ 2026-09-10 彻底修复(与桌面同根因): 桶的 snapMins 是日历日绝对分钟。
+      //   夜班凌晨(dayOff=-1)查询 t 是班次日分钟(1230..1910); 若桶里同时含 昨日前半夜(1230..1410)
+      //   与 今日后半夜(30..470), 直排日历分钟 → 数值序 [30..470,1230..1410] 与真实时间序颠倒,
+      //   后半夜边界查询会拿前半夜更低值触发换班清零外推 → 错乱。改为把后半夜桶 +1440 归一化回班次日序。
+      var post = (dayOff===-1);
+      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; var m2=snapMins(sn); if (post && m2<NIGHT_END) m2+=1440; pts.push({ m:m2, v:usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0) }); }
       pts.sort(function(a,b){ return a.m-b.m; });
-      var tAbs = (dayOff===-1 && t>=1440) ? t-1440 : t;
+      var tAbs = t; // 查询边界直接用班次日分钟 (day 同制)
       var lo=null, hi=null, hiN=null;
       for (var k=0;k<pts.length;k++){
         if (pts[k].m<=tAbs) lo=pts[k];
