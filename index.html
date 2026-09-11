@@ -1947,6 +1947,8 @@
   /* 语音输入已移除，避免旧版本缓存的入口再次出现在界面。 */
   var obsoleteMic=panel.querySelector("#mAIWidgetMic");
   if(obsoleteMic) obsoleteMic.remove();
+  var composeHint=panel.querySelector(".ai-compose-hint");
+  if(composeHint) composeHint.remove();
 
   function esc(t){ return String(t==null?"":t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];}); }
   /* markdown 表格行 → HTML 表格 (仅当整个 block 都是表头+分隔+数据行) */
