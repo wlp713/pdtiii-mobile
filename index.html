@@ -2099,8 +2099,13 @@
     function refit(){
       if(panel.style.display!=="flex") return;
       var keyboardH=aiKeyboardViewportHeight();
-      if(keyboardH) panel.style.setProperty("--ai-viewport-height",Math.max(320,Math.round(keyboardH))+"px");
-      else panel.style.removeProperty("--ai-viewport-height");
+      if(keyboardH){ panel.style.setProperty("--ai-viewport-height",Math.max(320,Math.round(keyboardH))+"px"); }
+      else {
+        panel.style.removeProperty("--ai-viewport-height");
+        // 键盘收起 → 面板恢复满高：把消息区滚到底, 让最新消息/输入框贴底, 不回半空
+        var msgs=document.getElementById("mAIWidgetMsgs");
+        if(msgs){ msgs.scrollTop=msgs.scrollHeight; }
+      }
       if(document.activeElement===input && vv && vv.height < window.innerHeight-180){
         window.requestAnimationFrame(function(){ input.scrollIntoView({block:"nearest",inline:"nearest"}); });
       }
