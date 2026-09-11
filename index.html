@@ -1793,6 +1793,7 @@
     ".ai-head-hist-btn{height:32px;padding:0 10px;border:1px solid rgba(255,255,255,.25);border-radius:8px;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;font-size:12px;font-weight:800}" +
     ".ai-message.user .ai-message-bubble{border:0;border-radius:14px 4px 14px 14px;background:#1d5fd1;color:#fff}" +
     ".ai-composer{padding:10px 12px;border-top:1px solid var(--ai-line);background:rgba(255,255,255,.85)}" +
+    ".ai-lang-row{display:flex;align-items:center;gap:8px;margin-bottom:7px}.ai-lang-label{font-size:11px;color:#8a9ab0;font-weight:700}.ai-lang-opts{display:flex;gap:4px}.ai-lang-btn{padding:3px 9px;border:1px solid #dfe7f2;border-radius:7px;background:#fff;color:#506b8d;font-size:11px;font-weight:700;cursor:pointer;line-height:1.4}.ai-lang-btn.on{background:#1d5fd1;color:#fff;border-color:#1d5fd1}" +
     ".ai-composer-box{display:flex;align-items:flex-end;gap:8px;padding:5px;border:1px solid #cbd8e8;border-radius:13px;background:#f9fbfe}" +
     ".ai-composer textarea{flex:1;min-height:40px;max-height:110px;resize:none;border:0;outline:0;background:transparent;padding:8px;color:var(--ai-ink);font-size:14px;line-height:1.5}.ai-composer textarea::placeholder{color:#94a3b8}" +
     ".ai-icon-btn,.ai-send-btn{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:10px;cursor:pointer}.ai-icon-btn{border:1px solid #d2ddea;background:#fff;color:#506b8d;font-size:17px}.ai-send-btn{border:0;background:#1d5fd1;color:#fff;font-size:17px}" +
@@ -1806,7 +1807,7 @@
   panel.id = "mAIWidgetPanel";
   panel.innerHTML =
     '<div class="ai-panel-head"><div class="ai-brand"><span class="ai-brand-copy"><small>AI OPERATIONS COPILOT</small><strong>产出经营诊断</strong></span></div><div class="ai-head-actions"><span class="ai-live-dot"><i></i>已加载</span><button id="mAIHistBtn" class="ai-head-hist-btn" title="历史对话">🕘</button><button id="mAIWidgetReset" class="ai-head-btn">新对话</button><button id="mAIWidgetClose" class="ai-head-btn ai-close">×</button></div></div>' +
-    '<div class="ai-chat"><div class="ai-chat-intro"><h3>围绕当前数据追问</h3><p>先给结论, 再给证据; 数据不足会明确标出。</p></div><div id="mAIWidgetMsgs" class="ai-messages" role="log"></div><div class="ai-composer"><div class="ai-composer-box"><textarea id="mAIWidgetInput" rows="1" placeholder="问: 今天各车间排名? 昨天夜班加班产出? 欠产最多线?"></textarea><button id="mAIWidgetMic" class="ai-icon-btn" title="语音输入">🎤</button><button id="mAIWidgetSend" class="ai-send-btn" title="发送">➤</button></div></div></div>' +
+    '<div class="ai-chat"><div class="ai-chat-intro"><h3>围绕当前数据追问</h3><p>先给结论, 再给证据; 数据不足会明确标出。</p></div><div id="mAIWidgetMsgs" class="ai-messages" role="log"></div><div class="ai-composer"><div class="ai-lang-row"><span class="ai-lang-label">语音</span><span class="ai-lang-opts"><button type="button" class="ai-lang-btn" data-lang="zh-CN">中文</button><button type="button" class="ai-lang-btn" data-lang="en-US">English</button><button type="button" class="ai-lang-btn" data-lang="th-TH">ไทย</button></span></div><div class="ai-composer-box"><textarea id="mAIWidgetInput" rows="1" placeholder="问: 今天各车间排名? 昨天夜班加班产出? 欠产最多线?"></textarea><button id="mAIWidgetMic" class="ai-icon-btn" title="语音输入(当前: 中文)">🎤</button><button id="mAIWidgetSend" class="ai-send-btn" title="发送">➤</button></div></div></div>' +
     '<div class="ai-hist-drawer" id="mAIHistDrawer"><div class="ai-hist-head"><strong>🕘 历史对话</strong><button class="ai-hist-close" id="mAIHistClose" aria-label="关闭">✕</button></div><div class="ai-hist-list" id="mAIHistList"></div></div>';
   document.body.appendChild(panel);
 
@@ -1953,15 +1954,25 @@
     askAI(q);
   }
 
-  /* 语音 */
+  /* 语音（支持 中文/English/ไทย） */
   var mic=document.getElementById("mAIWidgetMic");
-  var SR=window.SpeechRecognition||window.webkitSpeechRecognition, rec=null, recording=false;
-  if(!SR){ mic.style.opacity=".4"; mic.title="当前浏览器不支持语音"; } else {
-    rec=new SR(); rec.lang="zh-CN"; rec.interimResults=false; rec.maxAlternatives=1;
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition, rec=null, recording=false, curLang="zh-CN";
+  var LANG_NAME={ "zh-CN":"中文", "en-US":"English", "th-TH":"ไทย" };
+  var langBtns=document.querySelectorAll(".ai-lang-btn");
+  function setLang(l){
+    curLang=l; mic.title="语音输入(当前: "+LANG_NAME[l]+")";
+    langBtns.forEach(function(b){ b.classList.toggle("on", b.getAttribute("data-lang")===l); });
+    if(rec) rec.lang=l;
+  }
+  langBtns.forEach(function(b){ b.addEventListener("click",function(){ setLang(b.getAttribute("data-lang")); }); });
+  setLang("zh-CN");
+  if(!SR){ mic.style.opacity=".4"; mic.title="当前浏览器不支持语音"; langBtns.forEach(function(b){ b.style.opacity=".4"; b.style.pointerEvents="none"; }); } else {
+    rec=new SR(); rec.lang=curLang; rec.interimResults=false; rec.maxAlternatives=1;
     rec.onresult=function(e){ input.value+=(input.value?"\n":"")+e.results[0][0].transcript; recording=false; mic.textContent="🎤"; mic.style.background="#fff"; };
     rec.onerror=rec.onend=function(){ recording=false; mic.textContent="🎤"; mic.style.background="#fff"; };
     mic.addEventListener("click",function(){
       if(recording){ rec.stop(); return; }
+      rec.lang=curLang;
       try{ rec.start(); recording=true; mic.textContent="🔴"; mic.style.background="#fee2e2"; }catch(e){}
     });
   }
@@ -2007,8 +2018,25 @@
   }
 
   /* 绑定 */
-  fab.addEventListener("click",function(){ panel.style.display="flex"; histDrawer.classList.remove("open"); renderHist(); input.focus(); });
-  document.getElementById("mAIWidgetClose").addEventListener("click",function(){ panel.style.display="none"; });
+  // 返回回到看板: 打开 AI 面板压入历史栈, 系统返回(Android back/iOS左滑/edge-swipe)先关闭面板回到看板, 不直接退出网页
+  function openPanel(){
+    panel.style.display = "flex";
+    histDrawer.classList.remove("open");
+    renderHist();
+    input.focus();
+    try{ history.pushState({ aiPanel:true }, ""); }catch(e){}
+    setTimeout(function(){ input.focus(); }, 120);
+  }
+  function closePanel(){
+    if (panel.style.display !== "flex") return;
+    panel.style.display = "none";
+  }
+  fab.addEventListener("click", openPanel);
+  document.getElementById("mAIWidgetClose").addEventListener("click", function(){ closePanel(); try{ history.back(); }catch(e){} });
+  // 系统返回: 若 AI 面板开着 → 关闭它回到看板; 否则放行(回到主界面/退出)
+  window.addEventListener("popstate", function(e){
+    if (panel.style.display === "flex") closePanel();
+  });
   document.getElementById("mAIWidgetReset").addEventListener("click",newConversation);
   document.getElementById("mAIHistBtn").addEventListener("click",function(){ histDrawer.classList.toggle("open"); renderHist(); });
   document.getElementById("mAIHistClose").addEventListener("click",function(){ histDrawer.classList.remove("open"); });
