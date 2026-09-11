@@ -1735,13 +1735,13 @@
     /* 车间明细: 白/夜班产出 + 加班 + 车间排名 (来自 analytics.json) */
     var AD = (typeof window.__ANA_DAYS__ !== "undefined") ? window.__ANA_DAYS__ : null;
     if (AD && AD.length) {
-      out.push("\n【车间明细 · 白班/夜班/加班 · 近" + AD.length + "天】");
+      out.push("\n【车间明细 · 每日白班/夜班独立 · 近" + AD.length + "天】(按日期查昨日白班/夜班就看这里: 每条是 日期+白班(正常/加班/总/达成率)+夜班(正常/加班/总/达成率))");
       AD.slice(-7).forEach(function(d){
         var dt=d.day, nt=d.night;
-        out.push("  "+d.date+" 白班 正常"+dt.normal+" 加班"+dt.overtime+" 总"+dt.total+" 达成率"+(dt.attainment==null?"-":dt.attainment)+"%"+" | 夜班 正常"+nt.normal+" 加班"+nt.overtime+" 总"+nt.total+(nt.attainment==null?"":" 达成率"+nt.attainment+"%"));
+        out.push("  "+d.date+" | 白班: 正常"+dt.normal+" 加班"+dt.overtime+" 总"+dt.total+(dt.attainment==null?"":" 达成率"+dt.attainment+"%")+" | 夜班: 正常"+nt.normal+" 加班"+nt.overtime+" 总"+nt.total+(nt.attainment==null?"":" 达成率"+nt.attainment+"%"));
         if (d.workshops && d.workshops.length) {
           var top=d.workshops.slice(0,8).map(function(w){ return w.ws+"总"+w.total+(w.attainment!=null?"("+w.attainment+"%)":""); }).join(" > ");
-          out.push("    车间排名: "+top);
+          out.push("    该日车间排名: "+top);
         }
       });
     } else {
@@ -1925,7 +1925,7 @@
     var payload={
       query:q, context:collectContext(),
       mode:"pdtiii_operations_diagnosis_v2",
-      response_contract:"先给结论; 再列证据(日期、范围、指标); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/指标)。没有数据就明确说未知, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。",
+      response_contract:"先给结论; 再列证据(日期、范围、指标); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/指标)。没有数据就明确说未知, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。回答白班或夜班问题(如'昨日白班产出''昨天夜班达成率')时, 必须优先从 车间明细 里读取对应日期下的 白班(normal/overtime/total) 与 夜班(normal/overtime/total) 独立数值, 逐项回答; 不要因为页面默认显示全天就说看不到白班或夜班, 也不要只泛泛说全天数据。车间明细若未标注某日某班次, 才说明该班次无数据。",
       conversation_id:loadConv()
     };
     var busyMsg=addMsg("🤖 思考中…","ai");
@@ -2023,6 +2023,10 @@
     panel.style.display = "flex";
     histDrawer.classList.remove("open");
     renderHist();
+    // 若产出分析数据(含白班/夜班明细)尚未取到, 立即刷新, 让 AI 之后可按班次答
+    if (!(window.__ANA_DAYS__ && window.__ANA_DAYS__.length) && typeof reloadAnalytics === "function") {
+      reloadAnalytics();
+    }
     input.focus();
     try{ history.pushState({ aiPanel:true }, ""); }catch(e){}
     setTimeout(function(){ input.focus(); }, 120);
