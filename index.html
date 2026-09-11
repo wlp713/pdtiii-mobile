@@ -1574,7 +1574,8 @@
      手机端不做产出分析 UI, 但要把白班/夜班/加班/车间排名喂给 AI。
      直接 fetch 洗好的 analytics.json (GitHub Pages 每日快照, CORS开放), 解析出可供 AI 的上下文。 */
   var _anaRetry = null;
-  var ANA_DAYS = [];        // 解析后的每日产出数组 {date, day:{...}, night:{...}, workshops:{...}}
+  var ANA_DAYS = [];        // 解析后的每日产出数组 {date, day:{...}, night:{...}, workshops:{...}, lines:{...}}
+  var ANA_FINISHED_INDEX = Object.create(null); // 成品线口径索引，来自 analytics.json 的 finishedProductLines
   window.__ANA_DAYS__ = ANA_DAYS;   // 供 AI 模块读取
   function fetchAnalytics(){
     return fetch("https://wlp713.github.io/pdtiii-live/history/analytics.json?v=mobile" + Date.now(), { cache: "no-store" })
@@ -1591,22 +1592,48 @@
     try {
       if (!src || !src.days) return;
       ANA_DAYS.length = 0;
+      ANA_FINISHED_INDEX = Object.create(null);
+      var fp = src.finishedProductLines || {};
+      Object.keys(fp).forEach(function(ws){
+        (fp[ws] || []).forEach(function(name){
+          ANA_FINISHED_INDEX[String(name).toLowerCase().replace(/[^a-z0-9]+/g, "")] = { workshop: ws, name: name };
+        });
+      });
+      function metric(v){ return (v === null || v === undefined || v === "") ? null : (isFinite(Number(v)) ? Number(v) : null); }
+      function pack(s){ s=s||{}; return { normal:metric(s.normal), overtime:metric(s.overtime), total:metric(s.total), plan:metric(s.plan), attainment:metric(s.attainment) }; }
       (src.days || []).forEach(function(d){
         var day = d.totals && d.totals.day ? d.totals.day : {};
         var night = d.totals && d.totals.night ? d.totals.night : {};
-        // 车间排名数据源
+        // 车间汇总优先使用成品口径，不把工序/辅助线混进经营分析。
         var wsRank = [];
-        var ws = d.workshops || {};
+        var ws = d.finishedProducts || d.workshops || {};
         Object.keys(ws).forEach(function(k){
-          var w = ws[k]; var dd = (w && w.day) ? w.day : {};
-          wsRank.push({ ws: k, total: Number(dd.total)||0, plan: Number(dd.plan)||0, attainment: (dd.attainment!=null?dd.attainment:null), lineCount: (w.lineCount||0) });
+          var w = ws[k] || {}; var dd = (w && w.day) ? w.day : {};
+          wsRank.push({ ws: k, total: metric(dd.total), plan: metric(dd.plan), attainment: metric(dd.attainment), lineCount: (w.lineCount||0), day:pack(w.day), night:pack(w.night), finishedProduct:true });
         });
         wsRank.sort(function(a,b){ return (b.total||0) - (a.total||0); });
+        // 关键：保留 analytics.json 中的每条线体明细，供 AI 按日期 + 班次 + 线体精确回答。
+        var lineMap = {};
+        Object.keys(d.lines || {}).forEach(function(name){
+          var raw=d.lines[name]||{};
+          var key=String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
+          var indexed=ANA_FINISHED_INDEX[key];
+          lineMap[name]={
+            workshop: raw.workshop || (indexed && indexed.workshop) || "未标注",
+            finishedProduct: Boolean(indexed),
+            day:pack(raw.day),
+            night:pack(raw.night),
+            lastDayMinute: raw.lastDayMinute==null ? null : Number(raw.lastDayMinute),
+            lastNightMinute: raw.lastNightMinute==null ? null : Number(raw.lastNightMinute)
+          };
+        });
         ANA_DAYS.push({
           date: d.date,
-          day: { normal: Number(day.normal)||0, overtime: Number(day.overtime)||0, total: Number(day.total)||0, plan: Number(day.plan)||0, attainment: (day.attainment!=null?day.attainment:null) },
-          night:{ normal: Number(night.normal)||0, overtime: Number(night.overtime)||0, total: Number(night.total)||0, plan: Number(night.plan)||0, attainment: (night.attainment!=null?night.attainment:null) },
-          workshops: wsRank
+          day: pack(day),
+          night: pack(night),
+          workshops: wsRank,
+          lines: lineMap,
+          quality: d.quality || {}
         });
       });
     } catch(e){ /* 解析失败则保持空数组, AI 会标记数据不足 */ }
@@ -1692,9 +1719,88 @@
 
   function getStateRef(){ try { if (window.state) return window.state; } catch(e){} return null; }
 
-  /* ── 上下文采集: 实时(当天/关键线) + 历史 + 问题点 + 车间明细(白夜班/加班/排名) ── */
-  function collectContext() {
-    var out = [];
+  /* 查询解析只针对已加载的静态归档，不改页面日期，也不访问 Firebase。 */
+  function metricText(v){ return (v===null || v===undefined || v==="") ? "缺失" : String(v); }
+  function normQueryText(v){ return String(v||"").toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, ""); }
+  function shiftText(key){ return key==="day" ? "白班" : (key==="night" ? "夜班" : "全天"); }
+  function shiftKeysForQuery(q){
+    var s=String(q||"");
+    var hasDay=/(白班|白班段|day\s*shift|\bday\b)/i.test(s);
+    var hasNight=/(夜班|晚班|夜班段|night\s*shift|\bnight\b)/i.test(s);
+    var all=/(全天|完整工作日|全日|全天汇总|full\s*day|whole\s*day|daily)/i.test(s);
+    if(all || (hasDay && hasNight)) return ["day","night"];
+    if(hasDay) return ["day"];
+    if(hasNight) return ["night"];
+    return ["day","night"];
+  }
+  function localDateString(dt){
+    var y=dt.getFullYear(), m=("0"+(dt.getMonth()+1)).slice(-2), d=("0"+dt.getDate()).slice(-2);
+    return y+"-"+m+"-"+d;
+  }
+  function queryDates(q, days){
+    var s=String(q||""), result=[], seen={};
+    function add(v){ if(v && !seen[v]){ seen[v]=true; result.push(v); } }
+    var iso=/20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}/g, m;
+    while((m=iso.exec(s))){
+      add(m[0].replace(/[/.]/g,"-").split("-").map(function(x,i){return i===0?x:("0"+x).slice(-2);}).join("-"));
+    }
+    var md=/((?:\d{1,2})月(?:\d{1,2})日|\b\d{1,2}[\/-]\d{1,2}\b)/g;
+    while((m=md.exec(s))){
+      var nums=m[0].match(/\d+/g)||[]; if(nums.length<2) continue;
+      var mm=("0"+Number(nums[0])).slice(-2), dd=("0"+Number(nums[1])).slice(-2), found=null;
+      (days||[]).some(function(d){ if(String(d.date||"").slice(5)===(mm+"-"+dd)){ found=d.date; return true; } return false; });
+      add(found || (new Date().getFullYear()+"-"+mm+"-"+dd));
+    }
+    if(/(今天|today)/i.test(s)) add(localDateString(new Date()));
+    if(/(昨天|昨日|yesterday)/i.test(s)){ var y=new Date(); y.setDate(y.getDate()-1); add(localDateString(y)); }
+    return result;
+  }
+  function workshopMentioned(q, ws){
+    var n=normQueryText(q), w=normQueryText(ws), short=w.replace(/^pro/,"");
+    return (w && n.indexOf(w)>-1) || (short && n.indexOf("pro"+short)>-1);
+  }
+  function lineMentioned(q, name){
+    var n=normQueryText(q), line=normQueryText(name), base=line.replace(/line$/i,"");
+    return (line.length>=5 && n.indexOf(line)>-1) || (base.length>=5 && n.indexOf(base)>-1);
+  }
+  function selectedLineNames(q, days){
+    var result=[], seen={};
+    (days||[]).forEach(function(d){
+      Object.keys(d.lines||{}).forEach(function(name){
+        var row=d.lines[name]||{};
+        if(!row.finishedProduct || seen[name]) return;
+        if(lineMentioned(q,name) || workshopMentioned(q,row.workshop)){ seen[name]=true; result.push(name); }
+      });
+    });
+    return result;
+  }
+  function shiftMetrics(s){
+    s=s||{};
+    return "正常"+metricText(s.normal)+" | 加班"+metricText(s.overtime)+" | 合计"+metricText(s.total)+" | 计划"+metricText(s.plan)+" | 达成率"+(s.attainment==null?"缺失":s.attainment+"%");
+  }
+  function appendTargetedArchive(out, query, days){
+    var dates=queryDates(query,days), shifts=shiftKeysForQuery(query), lineNames=selectedLineNames(query,days);
+    if(!dates.length && !lineNames.length) return;
+    if(!dates.length && days.length) dates=[days[days.length-1].date];
+    out.push("\n【精确查询结果 · 成品线归档 · 不受页面日期选择限制】");
+    dates.forEach(function(date){
+      var d=null; (days||[]).some(function(item){ if(String(item.date)===String(date)){d=item;return true;} return false; });
+      if(!d){ out.push("  "+date+" | 归档中没有这一天的可用记录（未知，不按0计算）"); return; }
+      var names=lineNames.length ? lineNames.slice() : Object.keys(d.lines||{}).filter(function(name){ return d.lines[name] && d.lines[name].finishedProduct; });
+      out.push("  日期 "+d.date+" | 质量 白班="+((d.quality&&d.quality.dayStatus)||"未知")+" 夜班="+((d.quality&&d.quality.nightStatus)||"未知"));
+      shifts.forEach(function(shift){
+        if(!names.length){ out.push("  "+d.date+" | "+shiftText(shift)+" | 没有可用成品线明细"); return; }
+        names.forEach(function(name){
+          var row=d.lines[name]||{};
+          out.push("  "+d.date+" | "+shiftText(shift)+" | ["+(row.workshop||"未标注")+"] "+name+" | "+shiftMetrics(row[shift]||{}));
+        });
+      });
+    });
+  }
+
+  /* ── 上下文采集: 实时 + 成品归档 + 查询命中的日期/班次/线体明细 ── */
+  function collectContext(query) {
+    var out = [], q=String(query||"");
     out.push("当前本地时间: " + new Date().toLocaleString("zh-CN", { hour12:false }));
     var st = getStateRef();
 
@@ -1732,23 +1838,25 @@
       });
     }
 
-    /* 车间明细: 白/夜班产出 + 加班 + 车间排名 (来自 analytics.json) */
+    /* 成品归档总览 + 按问题精确下钻到日期/班次/线体。 */
     var AD = (typeof window.__ANA_DAYS__ !== "undefined") ? window.__ANA_DAYS__ : null;
     if (AD && AD.length) {
-      out.push("\n【车间明细 · 每日白班/夜班独立 · 近" + AD.length + "天】(按日期查昨日白班/夜班就看这里: 每条是 日期+白班(正常/加班/总/达成率)+夜班(正常/加班/总/达成率))");
+      out.push("\n【成品归档总览 · 每日白班/夜班独立 · 共" + AD.length + "天】(正常、加班、合计、计划、达成率均按生产日期归档)");
       AD.slice(-7).forEach(function(d){
         var dt=d.day, nt=d.night;
-        out.push("  "+d.date+" | 白班: 正常"+dt.normal+" 加班"+dt.overtime+" 总"+dt.total+(dt.attainment==null?"":" 达成率"+dt.attainment+"%")+" | 夜班: 正常"+nt.normal+" 加班"+nt.overtime+" 总"+nt.total+(nt.attainment==null?"":" 达成率"+nt.attainment+"%"));
+        out.push("  "+d.date+" | 白班: "+shiftMetrics(dt)+" | 夜班: "+shiftMetrics(nt));
         if (d.workshops && d.workshops.length) {
-          var top=d.workshops.slice(0,8).map(function(w){ return w.ws+"总"+w.total+(w.attainment!=null?"("+w.attainment+"%)":""); }).join(" > ");
-          out.push("    该日车间排名: "+top);
+          var top=d.workshops.slice(0,8).map(function(w){ return w.ws+"总"+metricText(w.total)+(w.attainment!=null?"("+w.attainment+"%)":""); }).join(" > ");
+          out.push("    成品车间排名: "+top);
         }
       });
+      appendTargetedArchive(out,q,AD);
+      out.push("  可查询日期: "+AD.map(function(d){return d.date;}).join(", "));
     } else {
-      out.push("\n【车间明细】 (产出分析数据尚未准备好)");
+      out.push("\n【成品归档】(产出分析数据尚未准备好，不能把缺失当作0)");
     }
 
-    out.push("\n(数据为当前已加载快照; 若问任意某日, 从 车间明细 近7天挑选; 更早日期请说明仅能按可得数据回答)");
+    out.push("\n(以上精确明细来自静态 analytics.json 成品归档；AI 可直接按任意已归档日期、白班/夜班、车间或线体查询，不依赖当前页面日期)");
     return out.join("\n");
   }
 
@@ -1800,6 +1908,24 @@
     "html.ai-modal-open,body.ai-modal-open{overflow:hidden!important}#mAIWidgetPanel{isolation:isolate;contain:layout paint;overscroll-behavior:contain;box-shadow:0 24px 80px rgba(5,20,48,.4),0 0 0 100vmax rgba(8,20,42,.42)}#mAIWidgetPanel .ai-panel-head{position:sticky;top:0;z-index:6;flex:0 0 auto;padding-top:max(14px,env(safe-area-inset-top));isolation:isolate}#mAIWidgetPanel .ai-chat{overflow:hidden;min-height:0}#mAIWidgetPanel .ai-messages{overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}#mAIWidgetPanel .ai-composer{position:relative;z-index:4;flex:0 0 auto;padding-bottom:max(10px,env(safe-area-inset-bottom))}#mAIWidgetPanel .ai-composer-box{min-width:0;min-height:56px}#mAIWidgetPanel .ai-composer textarea{min-width:0;width:0;max-width:100%;font-family:inherit;font-size:16px;line-height:1.45}#mAIWidgetPanel .ai-icon-btn,#mAIWidgetPanel .ai-send-btn{flex:0 0 44px;width:44px;height:44px;border-radius:50%;touch-action:manipulation;user-select:none;-webkit-tap-highlight-color:transparent}#mAIWidgetPanel .ai-send-btn:disabled{background:#cbd5e1;color:#fff;cursor:not-allowed;opacity:.82;transform:none;box-shadow:none}#mAIWidgetPanel .ai-icon-btn[aria-pressed=\"true\"]{border-color:#ef9a9a;background:#fff1f2;color:#dc2626;box-shadow:0 0 0 4px rgba(239,68,68,.1)}#mAIWidgetPanel .ai-icon-btn[aria-pressed=\"true\"] svg{animation:aiMicPulse 1.35s ease-in-out infinite}@keyframes aiMicPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}#mAIWidgetPanel .ai-brand-mark{display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;border:1px solid rgba(255,255,255,.2);border-radius:11px;background:rgba(255,255,255,.1)}#mAIWidgetPanel .ai-brand-mark svg{width:20px;height:20px}#mAIWidgetPanel .ai-hist-head strong{display:flex;align-items:center;gap:7px}" +
     "@media (max-width:720px){#mAIWidgetPanel{inset:0;width:100vw;max-width:100vw;height:var(--ai-viewport-height,100dvh);max-height:var(--ai-viewport-height,100dvh);min-height:0;border-radius:0}#mAIWidgetPanel .ai-panel-head{padding:max(12px,env(safe-area-inset-top)) 14px 14px;min-height:64px;background:linear-gradient(180deg,rgba(13,33,67,.98),rgba(27,77,156,.92) 70%,rgba(27,77,156,0) 100%)}#mAIWidgetPanel .ai-head-actions{gap:6px}#mAIWidgetPanel .ai-live-dot{display:none}#mAIWidgetPanel .ai-head-btn,#mAIWidgetPanel .ai-head-hist-btn{min-width:42px;min-height:40px;border-radius:11px}#mAIWidgetPanel .ai-chat-intro{flex:0 0 auto;padding:12px 16px 10px}#mAIWidgetPanel .ai-messages{padding:14px 12px 18px}#mAIWidgetPanel .ai-message{gap:8px;margin-bottom:14px}#mAIWidgetPanel .ai-message-avatar{flex-basis:28px;width:28px;height:28px}#mAIWidgetPanel .ai-message-body{max-width:calc(100% - 36px);flex-basis:calc(100% - 36px)}#mAIWidgetPanel .ai-message-bubble{padding:12px 13px;font-size:15px;line-height:1.62;border-radius:5px 16px 16px 16px}#mAIWidgetPanel .ai-message.user .ai-message-bubble{border-radius:16px 5px 16px 16px}#mAIWidgetPanel .ai-composer{padding:8px 10px max(10px,env(safe-area-inset-bottom));background:rgba(247,249,252,.97)}#mAIWidgetPanel .ai-composer-box{gap:7px;padding:6px;border-radius:19px;background:#fff;box-shadow:0 5px 18px rgba(31,58,96,.09)}#mAIWidgetPanel .ai-composer textarea{min-height:42px;max-height:132px;padding:8px 7px}#mAIWidgetPanel .ai-compose-hint{display:block;margin:5px 6px 0;font-size:10px;line-height:1.4;text-align:center}#mAIWidgetPanel .ai-brand-copy small{font-size:8px;letter-spacing:1.2px}#mAIWidgetPanel .ai-brand-copy strong{font-size:15px}}@media (max-width:380px){#mAIWidgetPanel .ai-brand-copy small{display:none}#mAIWidgetPanel .ai-message-bubble{font-size:14px}#mAIWidgetPanel .ai-compose-hint{font-size:9px}}";
   document.head.appendChild(style);
+  /* 根层弹窗：与主页面建立独立层级，避免 sticky header / line detail 穿透。 */
+  style.textContent += "" +
+    "#mAIWidgetBackdrop{position:fixed;inset:0;z-index:2147483000;display:none;background:rgba(5,12,24,.62);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);pointer-events:auto}" +
+    "#mAIWidgetBackdrop.is-open{display:block}" +
+    "#mAIWidgetPanel{position:fixed;left:50%;top:50%;right:auto;bottom:auto;inset:auto;transform:translate(-50%,-50%);z-index:2147483001;width:min(1080px,calc(100vw - 32px));height:min(820px,calc(100vh - 32px));max-width:none;max-height:none;margin:0;contain:none;isolation:isolate;overflow:hidden;background:#f7f9fc;border:0;border-radius:18px;box-shadow:0 28px 80px rgba(3,14,32,.42)}" +
+    "#mAIWidgetPanel .ai-panel-head{position:relative;z-index:30;flex:0 0 auto;min-height:64px;background:linear-gradient(135deg,#0b1d38 0%,#153f83 100%)}" +
+    "#mAIWidgetPanel .ai-brand{flex:1;min-width:0}.ai-brand-copy{min-width:0}.ai-brand-copy strong{overflow:hidden;text-overflow:ellipsis}" +
+    "#mAIWidgetPanel .ai-head-actions{display:flex;flex:0 0 auto;min-width:0;gap:6px}.ai-head-btn,.ai-head-hist-btn{display:grid;place-items:center;min-width:40px;min-height:40px;padding:0}.ai-head-btn svg,.ai-head-hist-btn svg{width:17px;height:17px}" +
+    "#mAIWidgetPanel .ai-chat{position:relative;z-index:1;display:flex;flex:1;min-height:0;overflow:hidden;background:#f7f9fc}" +
+    "#mAIWidgetPanel .ai-chat-intro{flex:0 0 auto;background:#fff;border-bottom:1px solid #e5ebf3;padding:14px 16px 12px}.ai-intro-row{display:flex;align-items:center;gap:9px}.ai-intro-row h3{margin:0}.ai-scope-pill{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;background:#eaf1fd;color:#1d5fd1;font-size:10px;font-weight:800;white-space:nowrap}.ai-quick-prompts{display:flex;gap:7px;overflow-x:auto;margin-top:10px;padding-bottom:1px;scrollbar-width:none}.ai-quick-prompts::-webkit-scrollbar{display:none}.ai-quick{flex:0 0 auto;height:30px;padding:0 10px;border:1px solid #dce5f0;border-radius:999px;background:#f8fafd;color:#52708f;font-size:11px;font-weight:700;cursor:pointer}.ai-quick:active{background:#eaf1fd;border-color:#9dbce7;color:#1d5fd1}" +
+    "#mAIWidgetPanel .ai-messages{position:relative;z-index:1;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;padding:16px 16px 20px}" +
+    "#mAIWidgetPanel .ai-message{display:flex;align-items:flex-start;gap:9px;width:100%;margin:0 0 16px}.ai-message-body{display:flex;flex:0 1 auto;min-width:0;max-width:calc(100% - 35px)}.ai-message.user .ai-message-body{align-items:flex-end}.ai-message:not(.user) .ai-message-bubble{width:100%}.ai-message-bubble{display:block;width:fit-content;max-width:100%;overflow-wrap:anywhere;word-break:break-all}.ai-message-bubble .ai-table-wrap{max-width:100%}" +
+    "#mAIWidgetPanel .ai-composer{position:relative;z-index:30;flex:0 0 auto;background:#fff;border-top:1px solid #e1e8f1;padding:10px 12px max(10px,env(safe-area-inset-bottom))}" +
+    "#mAIWidgetPanel .ai-composer-box{min-width:0;background:#f8fafd}.ai-composer textarea{min-width:0;width:0;max-width:100%;font-size:16px;line-height:1.45}.ai-icon-btn,.ai-send-btn{flex:0 0 44px;width:44px;height:44px;border-radius:50%;touch-action:manipulation}" +
+    "#mAIWidgetPanel .ai-hist-drawer{position:absolute;inset:0;z-index:40;width:min(340px,88vw);max-width:none;border:0;box-shadow:12px 0 30px rgba(10,31,62,.16)}#mAIWidgetPanel .ai-hist-head{position:relative;z-index:1;padding-top:max(14px,env(safe-area-inset-top))}" +
+    "@media(max-width:720px){#mAIWidgetBackdrop{display:none!important}#mAIWidgetPanel{left:0;top:0;transform:none;width:100vw;height:var(--ai-viewport-height,100dvh);max-height:var(--ai-viewport-height,100dvh);min-height:0;border-radius:0;box-shadow:none}#mAIWidgetPanel .ai-panel-head{padding:max(12px,env(safe-area-inset-top)) 14px 12px;min-height:64px}#mAIWidgetPanel .ai-chat-intro{padding:12px 14px 10px}#mAIWidgetPanel .ai-messages{padding:14px 12px 18px}#mAIWidgetPanel .ai-composer{padding:8px 10px max(10px,env(safe-area-inset-bottom))}#mAIWidgetPanel .ai-composer-box{padding:6px;border-radius:19px;background:#fff;box-shadow:0 5px 18px rgba(31,58,96,.09)}#mAIWidgetPanel .ai-composer textarea{min-height:42px;max-height:132px;padding:8px 7px}#mAIWidgetPanel .ai-quick-prompts{margin-top:8px}.ai-compose-hint{display:block;margin:5px 6px 0;font-size:10px;line-height:1.4;text-align:center}}" +
+    "@media(max-width:380px){#mAIWidgetPanel .ai-live-dot{display:none}#mAIWidgetPanel .ai-brand-copy small{display:none}#mAIWidgetPanel .ai-message-bubble{font-size:14px}.ai-quick{padding:0 8px;font-size:10px}}";
+  style.textContent += "@media(max-width:720px){#mAIWidgetPanel{height:var(--ai-viewport-height,100lvh);max-height:var(--ai-viewport-height,100lvh)}}";
 
   /* ── DOM ── 顶栏入口 (去 FAB 悬浮按钮) */
   var fab = document.getElementById("aiBtn");
@@ -1810,10 +1936,17 @@
   panel.setAttribute("aria-modal", "true");
   panel.setAttribute("aria-labelledby", "mAIWidgetTitle");
   panel.innerHTML =
-    '<div class="ai-panel-head"><div class="ai-brand"><span class="ai-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M8 12h.01M16 12h.01M12 4v4M9 16h6"/></svg></span><span class="ai-brand-copy"><small>AI OPERATIONS COPILOT</small><strong id="mAIWidgetTitle">产出经营诊断</strong></span></div><div class="ai-head-actions"><span class="ai-live-dot"><i></i>已加载</span><button id="mAIHistBtn" class="ai-head-hist-btn" type="button" title="历史对话" aria-label="历史对话"><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></button><button id="mAIWidgetReset" class="ai-head-btn" type="button">新对话</button><button id="mAIWidgetClose" class="ai-head-btn ai-close" type="button" aria-label="关闭 AI 助手">×</button></div></div>' +
-    '<div class="ai-chat"><div class="ai-chat-intro"><h3>围绕当前数据追问</h3><p>先给结论，再给证据；数据不足会明确标出。</p></div><div id="mAIWidgetMsgs" class="ai-messages" role="log" aria-live="polite" aria-label="AI 对话记录"></div><div class="ai-composer"><div class="ai-composer-box"><textarea id="mAIWidgetInput" rows="1" aria-label="询问 AI 助手" autocomplete="off" autocapitalize="sentences" autocorrect="on" spellcheck="true" inputmode="text" enterkeyhint="send" placeholder="例如：查询昨天夜班各车间的正常和加班产出"></textarea><button id="mAIWidgetMic" class="ai-icon-btn" type="button" aria-label="语音输入" aria-pressed="false" title="语音输入"><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg></button><button id="mAIWidgetSend" class="ai-send-btn" type="button" aria-label="发送问题" title="发送" disabled><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg></button></div><div class="ai-compose-hint">Enter 发送 · Shift + Enter 换行</div></div></div>' +
+     '<div class="ai-panel-head"><div class="ai-brand"><span class="ai-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M8 12h.01M16 12h.01M12 4v4M9 16h6"/></svg></span><span class="ai-brand-copy"><small>AI OPERATIONS COPILOT</small><strong id="mAIWidgetTitle">产出经营诊断</strong></span></div><div class="ai-head-actions"><span class="ai-live-dot"><i></i>已加载</span><button id="mAIHistBtn" class="ai-head-hist-btn" type="button" title="历史对话" aria-label="历史对话"><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></button><button id="mAIWidgetReset" class="ai-head-btn" type="button" title="新对话" aria-label="新对话"><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button><button id="mAIWidgetClose" class="ai-head-btn ai-close" type="button" aria-label="关闭 AI 助手" title="关闭"><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div></div>' +
+     '<div class="ai-chat"><div class="ai-chat-intro"><div class="ai-intro-row"><h3>围绕数据追问</h3><span class="ai-scope-pill">成品归档</span></div><p>可直接指定日期、白班/夜班、车间或线体；缺失数据不会按 0 计算。</p><div class="ai-quick-prompts" role="list" aria-label="快捷问题"><button type="button" class="ai-quick" data-prompt="查询昨天夜班 Final A line 的正常和加班产出">昨天 · 夜班</button><button type="button" class="ai-quick" data-prompt="查询 2026-09-05 白班和夜班 PRO2 成品线产出">按车间</button><button type="button" class="ai-quick" data-prompt="查询 2026-09-05 Final A line 白班和夜班产出">按线体</button></div></div><div id="mAIWidgetMsgs" class="ai-messages" role="log" aria-live="polite" aria-label="AI 对话记录"></div><div class="ai-composer"><div class="ai-composer-box"><textarea id="mAIWidgetInput" rows="1" aria-label="询问 AI 助手" autocomplete="off" autocapitalize="sentences" autocorrect="on" spellcheck="true" inputmode="text" enterkeyhint="send" placeholder="例如：查询 9 月 5 日夜班 Final A line 的产出"></textarea><button id="mAIWidgetMic" class="ai-icon-btn" type="button" aria-label="语音输入" aria-pressed="false" title="语音输入"><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg></button><button id="mAIWidgetSend" class="ai-send-btn" type="button" aria-label="发送问题" title="发送" disabled><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg></button></div><div class="ai-compose-hint">Enter 发送 · Shift + Enter 换行</div></div></div>' +
     '<div class="ai-hist-drawer" id="mAIHistDrawer"><div class="ai-hist-head"><strong><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>历史对话</strong><button class="ai-hist-close" id="mAIHistClose" type="button" aria-label="关闭">×</button></div><div class="ai-hist-list" id="mAIHistList"></div></div>';
-  document.body.appendChild(panel);
+  var backdrop = document.createElement("div");
+  backdrop.id = "mAIWidgetBackdrop";
+  backdrop.setAttribute("aria-hidden", "true");
+  document.documentElement.appendChild(backdrop);
+  document.documentElement.appendChild(panel);
+  /* 语音输入已移除，避免旧版本缓存的入口再次出现在界面。 */
+  var obsoleteMic=panel.querySelector("#mAIWidgetMic");
+  if(obsoleteMic) obsoleteMic.remove();
 
   function esc(t){ return String(t==null?"":t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];}); }
   /* markdown 表格行 → HTML 表格 (仅当整个 block 都是表头+分隔+数据行) */
@@ -1902,11 +2035,6 @@
   function sendIconMarkup(){
     return '<svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg>';
   }
-  function micIconMarkup(active){
-    return active
-      ? '<svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="currentColor"><rect x="8" y="8" width="8" height="8" rx="2"/></svg>'
-      : '<svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg>';
-  }
   function resizeInput(){
     input.style.height="auto";
     input.style.height=Math.min(input.scrollHeight,132)+"px";
@@ -1933,13 +2061,15 @@
   }
   function lockBackground(){
     if(bodyLockState || !document.body) return;
-    bodyLockState={scrollY:window.pageYOffset||document.documentElement.scrollTop||0,htmlOverflow:document.documentElement.style.overflow,bodyPosition:document.body.style.position,bodyTop:document.body.style.top,bodyWidth:document.body.style.width,bodyOverflow:document.body.style.overflow};
+    bodyLockState={scrollY:window.pageYOffset||document.documentElement.scrollTop||0,htmlOverflow:document.documentElement.style.overflow,bodyPosition:document.body.style.position,bodyTop:document.body.style.top,bodyWidth:document.body.style.width,bodyOverflow:document.body.style.overflow,htmlOverscroll:document.documentElement.style.overscrollBehavior,bodyOverscroll:document.body.style.overscrollBehavior};
     document.documentElement.classList.add("ai-modal-open");
     document.body.classList.add("ai-modal-open");
     document.body.style.position="fixed";
     document.body.style.top=(-bodyLockState.scrollY)+"px";
     document.body.style.width="100%";
     document.body.style.overflow="hidden";
+    document.documentElement.style.overscrollBehavior="none";
+    document.body.style.overscrollBehavior="none";
   }
   function unlockBackground(){
     if(!bodyLockState || !document.body) return;
@@ -1947,20 +2077,29 @@
     document.documentElement.classList.remove("ai-modal-open");
     document.body.classList.remove("ai-modal-open");
     document.documentElement.style.overflow=s.htmlOverflow;
+    document.documentElement.style.overscrollBehavior=s.htmlOverscroll;
     document.body.style.position=s.bodyPosition;
     document.body.style.top=s.bodyTop;
     document.body.style.width=s.bodyWidth;
     document.body.style.overflow=s.bodyOverflow;
+    document.body.style.overscrollBehavior=s.bodyOverscroll;
     window.scrollTo(0,s.scrollY);
   }
   /* 键盘自适应: 软键盘弹出时把面板高度跟随 visualViewport (输入框始终可见) */
+  function aiKeyboardViewportHeight(){
+    var base=Math.max(Number(window.innerHeight)||0,Number(document.documentElement.clientHeight)||0);
+    var vv=window.visualViewport;
+    /* 地址栏/嵌套页面可能让 visualViewport 略小；只有明确像键盘一样大幅缩短时才跟随。 */
+    return (document.activeElement===input && vv && vv.height && vv.height < base-180) ? vv.height : 0;
+  }
   function bindKeyboard(){
     var vv = window.visualViewport;
     function refit(){
       if(panel.style.display!=="flex") return;
-      var h = (vv && vv.height) ? vv.height : window.innerHeight;
-      panel.style.setProperty("--ai-viewport-height",Math.max(320,Math.round(h))+"px");
-      if(document.activeElement===input && vv && vv.height < window.innerHeight-80){
+      var keyboardH=aiKeyboardViewportHeight();
+      if(keyboardH) panel.style.setProperty("--ai-viewport-height",Math.max(320,Math.round(keyboardH))+"px");
+      else panel.style.removeProperty("--ai-viewport-height");
+      if(document.activeElement===input && vv && vv.height < window.innerHeight-180){
         window.requestAnimationFrame(function(){ input.scrollIntoView({block:"nearest",inline:"nearest"}); });
       }
     }
@@ -1988,9 +2127,9 @@
   function askAI(q){
     setBusy(true);
     var payload={
-      query:q, context:collectContext(),
+      query:q, context:collectContext(q),
       mode:"pdtiii_operations_diagnosis_v2",
-      response_contract:"先给结论; 再列证据(日期、范围、指标); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/指标)。没有数据就明确说未知, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。回答白班或夜班问题(如'昨日白班产出''昨天夜班达成率')时, 必须优先从 车间明细 里读取对应日期下的 白班(normal/overtime/total) 与 夜班(normal/overtime/total) 独立数值, 逐项回答; 不要因为页面默认显示全天就说看不到白班或夜班, 也不要只泛泛说全天数据。车间明细若未标注某日某班次, 才说明该班次无数据。",
+      response_contract:"先给结论; 再列证据(日期、班次、车间/线体、正常段、加班段、合计); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/车间/线体/正常产出/加班产出/合计/达成率)。没有数据就明确说未知或缺失, 不要把缺失当作0, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。回答任意日期、白班、夜班、车间或线体问题时, 必须优先从 精确查询结果 读取对应日期 + 班次 + 成品线的独立数值; 页面当前选择的日期不构成查询范围, 不要说只能看到当前日期。只允许使用成品归档口径; 若归档质量为 partial/unknown 或字段为缺失, 必须明确标注数据质量，不得用其他工序产量补齐。",
       conversation_id:loadConv()
   };
     var busyMsg=addMsg("正在分析…","ai");
@@ -2019,33 +2158,7 @@
     askAI(q);
   }
 
-  /* 语音输入: 不再显示语言选择器，跟随当前页面语言自动识别。 */
-  var mic=document.getElementById("mAIWidgetMic");
-  var SR=window.SpeechRecognition||window.webkitSpeechRecognition, rec=null, recording=false;
-  function speechLang(){
-    var pageLang=String(document.documentElement.lang||"").toLowerCase();
-    return pageLang.indexOf("th")===0 ? "th-TH" : (pageLang.indexOf("zh")===0 ? "zh-CN" : "en-US");
-  }
-  function setRecording(active){
-    recording=Boolean(active);
-    mic.innerHTML=micIconMarkup(recording);
-    mic.setAttribute("aria-pressed",recording?"true":"false");
-    mic.setAttribute("aria-label",recording?"停止语音输入":"语音输入");
-    mic.title=recording?"正在聆听，点击停止":"语音输入";
-  }
-  if(!SR){ mic.disabled=true; mic.style.opacity=".45"; mic.title="当前浏览器不支持语音"; mic.setAttribute("aria-disabled","true"); } else {
-    rec=new SR(); rec.lang=speechLang(); rec.interimResults=false; rec.maxAlternatives=1;
-    rec.onresult=function(e){
-      input.value+=(input.value?"\n":"")+e.results[0][0].transcript;
-      setRecording(false); resizeInput(); syncSendState(); input.focus();
-    };
-    rec.onerror=rec.onend=function(){ setRecording(false); };
-    mic.addEventListener("click",function(){
-      if(recording){ rec.stop(); return; }
-      rec.lang=speechLang();
-      try{ rec.start(); setRecording(true); }catch(e){}
-    });
-  }
+  /* 语音输入已删除，输入框只保留文本输入与发送。 */
 
   /* ── 历史对话列表 ── */
   var histDrawer=document.getElementById("mAIHistDrawer");
@@ -2093,8 +2206,10 @@
     if(panel.style.display === "flex") return;
     focusBeforeOpen=document.activeElement;
     lockBackground();
+    backdrop.classList.add("is-open");
+    panel.classList.add("is-open");
     panel.style.display = "flex";
-    panel.style.setProperty("--ai-viewport-height",Math.max(320,Math.round(window.visualViewport ? window.visualViewport.height : window.innerHeight))+"px");
+    panel.style.removeProperty("--ai-viewport-height");
     histDrawer.classList.remove("open");
     renderHist();
     // 若产出分析数据(含白班/夜班明细)尚未取到, 立即刷新, 让 AI 之后可按班次答
@@ -2107,8 +2222,9 @@
   }
   function closePanel(){
     if (panel.style.display !== "flex") return;
-    if(recording && rec){ try{ rec.stop(); }catch(e){} }
     histDrawer.classList.remove("open");
+    backdrop.classList.remove("is-open");
+    panel.classList.remove("is-open");
     panel.style.display = "none";
     unlockBackground();
     if(focusBeforeOpen && typeof focusBeforeOpen.focus === "function"){
@@ -2117,6 +2233,7 @@
     focusBeforeOpen=null;
   }
   fab.addEventListener("click", openPanel);
+  backdrop.addEventListener("click", closePanel);
   document.getElementById("mAIWidgetClose").addEventListener("click", function(){ closePanel(); try{ history.back(); }catch(e){} });
   // 系统返回: 若 AI 面板开着 → 关闭它回到看板; 否则放行(回到主界面/退出)
   window.addEventListener("popstate", function(e){
@@ -2125,6 +2242,12 @@
   document.getElementById("mAIWidgetReset").addEventListener("click",newConversation);
   document.getElementById("mAIHistBtn").addEventListener("click",function(){ histDrawer.classList.toggle("open"); renderHist(); });
   document.getElementById("mAIHistClose").addEventListener("click",function(){ histDrawer.classList.remove("open"); });
+  Array.prototype.forEach.call(panel.querySelectorAll(".ai-quick"),function(btn){
+    btn.addEventListener("click",function(){
+      input.value=btn.getAttribute("data-prompt")||"";
+      resizeInput(); syncSendState(); input.focus();
+    });
+  });
   sendBtn.addEventListener("click",send);
   bindKeyboard();
   input.addEventListener("input",function(){ resizeInput(); syncSendState(); });
