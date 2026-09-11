@@ -400,6 +400,7 @@
 <header>
   <div class="h-top">
     <div class="h-title" id="title"><span class="h-ico"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5aa9ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l3-5h8l3 5v13"/><path d="M9 10h2v4H9z"/><path d="M13 10h2v5h-2z"/><path d="M9 18h2v3H9z"/><path d="M13 18h2v3h-2z"/></svg></span> <span style="font-size:17px">Production Board</span> <small id="modeTag">LIVE</small></div>
+    <button class="lang-btn" id="aiBtn" style="background:linear-gradient(135deg,#1d5fd1,#0d2343);color:#fff;border-color:rgba(255,255,255,.25)">🤖 AI</button>
     <button class="lang-btn" id="langBtn">TH</button>
   </div>
   <div class="h-sub">
@@ -560,6 +561,7 @@
   var DATA_URL = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii.json";
 
   var state = { lines: [], updatedAt: null, hourly: {} };
+  window.state = state;   // ★ 2026-09-11 AI: 暴露给 AI 模块读取实时数据 (电脑端 ai-widget 依赖 window.state)
 
   // ★ 2026-09-10 改动C: 停滞跟踪 — 记录每条线 actual 最后变化时间(localStorage 持久化, 刷新/重连不丢)
   var _stallKey = "pdtiii_stall_map_v1";
@@ -1568,9 +1570,52 @@
     document.head.appendChild(s);
   }
 
+  /* ── 2026-09-11 AI: 产出分析数据 (analytics.json) ──
+     手机端不做产出分析 UI, 但要把白班/夜班/加班/车间排名喂给 AI。
+     直接 fetch 洗好的 analytics.json (GitHub Pages 每日快照, CORS开放), 解析出可供 AI 的上下文。 */
+  var _anaRetry = null;
+  var ANA_DAYS = [];        // 解析后的每日产出数组 {date, day:{...}, night:{...}, workshops:{...}}
+  window.__ANA_DAYS__ = ANA_DAYS;   // 供 AI 模块读取
+  function fetchAnalytics(){
+    return fetch("https://wlp713.github.io/pdtiii-live/history/analytics.json?v=mobile" + Date.now(), { cache: "no-store" })
+      .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function(src){ parseAnalytics(src); })
+      .catch(function(e){ /* 失败保持空数组, AI 标数据不足 */ });
+  }
+  function reloadAnalytics(){
+    fetchAnalytics()
+      .then(function(){ if (_anaRetry){ clearTimeout(_anaRetry); _anaRetry=null; } })
+      .catch(function(){ if (!_anaRetry) _anaRetry = setTimeout(function(){ _anaRetry=null; reloadAnalytics(); }, 60000); });
+  }
+  function parseAnalytics(src){
+    try {
+      if (!src || !src.days) return;
+      ANA_DAYS.length = 0;
+      (src.days || []).forEach(function(d){
+        var day = d.totals && d.totals.day ? d.totals.day : {};
+        var night = d.totals && d.totals.night ? d.totals.night : {};
+        // 车间排名数据源
+        var wsRank = [];
+        var ws = d.workshops || {};
+        Object.keys(ws).forEach(function(k){
+          var w = ws[k]; var dd = (w && w.day) ? w.day : {};
+          wsRank.push({ ws: k, total: Number(dd.total)||0, plan: Number(dd.plan)||0, attainment: (dd.attainment!=null?dd.attainment:null), lineCount: (w.lineCount||0) });
+        });
+        wsRank.sort(function(a,b){ return (b.total||0) - (a.total||0); });
+        ANA_DAYS.push({
+          date: d.date,
+          day: { normal: Number(day.normal)||0, overtime: Number(day.overtime)||0, total: Number(day.total)||0, plan: Number(day.plan)||0, attainment: (day.attainment!=null?day.attainment:null) },
+          night:{ normal: Number(night.normal)||0, overtime: Number(night.overtime)||0, total: Number(night.total)||0, plan: Number(night.plan)||0, attainment: (night.attainment!=null?night.attainment:null) },
+          workshops: wsRank
+        });
+      });
+    } catch(e){ /* 解析失败则保持空数组, AI 会标记数据不足 */ }
+  }
+
   function refreshAll(){
     loadMain();
     reloadLiveData(); // 无条件刷新: 回前台立即同步最新 (不能因缓存旧数据就跳过)
+    reloadAnalytics(); // 2026-09-11 AI: 同步刷新产出分析数据
   }
 
   /* ── 线体分析视图 · 事件绑定 ── */
@@ -1605,15 +1650,234 @@
   buildWsChips();   // 2026-09-03: 车间 chips 一次性构建(数据刷新时只 updWsChips)
   loadMain();
   reloadLiveData(); // 启动无条件拉最新: 覆盖任何可能残留的旧版 live-data.js 缓存
+  reloadAnalytics(); // 2026-09-11 AI: 启动拉产出分析数据 (白/夜班/加班/车间排名 供 AI)
 
   setInterval(loadMain, 60000);
   setInterval(drawHourlyLive, 10000); // 小时产出: 每10秒轻刷当前段/图 (chips 不重建)
   setInterval(reloadLiveData, 600000); // 10分钟
+  setInterval(reloadAnalytics, 600000); // 2026-09-11 AI: 10分钟同步产出分析快照
   document.addEventListener("visibilitychange", function(){
     if (!document.hidden) refreshAll();
   });
 })();
 </script>
+
+<!-- ★ 2026-09-11 AI 助手 (手机版) · 复用电脑端 ai-widget 逻辑 + 移动端 FAB 入口 -->
+<script>
+(function () {
+  "use strict";
+  if (document.getElementById("mAIWidgetPanel")) return;
+
+  var CFG = {
+    proxyUrl: (function () {
+      try { return window.AICONFIG && window.AICONFIG.proxyUrl
+        ? window.AICONFIG.proxyUrl
+        : "https://midea-ai-proxy.wigifobi28.workers.dev/ai"; }
+      catch(e){ return "https://midea-ai-proxy.wigifobi28.workers.dev/ai"; }
+    })()
+  };
+
+  /* 车间分组 (与主看板 WS_GROUPS 一致) */
+  var WS_GROUPS = [
+    { ws: "PRO1",  label: "PRO1",            lines: ["Motor AC","Motor CL","Motor WL","Motor F-Series","Motor H-Series","Motor S-Series"] },
+    { ws: "PRO2R", label: "PRO2·Rot/Fin",    lines: ["Final A line","Final B Line","Final C line","Final D line","Rotor A line","Rotor B Line","Rotor C line","Rotor D Line"] },
+    { ws: "PRO2S", label: "PRO2·Ship",       lines: ["Inspection A","Inspection B","Inspection C","Inspection D"] },
+    { ws: "PRO3",  label: "PRO3",            lines: ["Welding A line","Welding B line","Welding C line","Welding D line"] },
+    { ws: "PRO4H", label: "PRO4·Hon/Pist",   lines: ["Frame No.1","Frame No.2","Frame No.3","Frame No.4","Frame No.5","Piston Grinding","Rod Pispin","Press C-Shaft"] },
+    { ws: "PRO4B", label: "PRO4·Body/Pin",   lines: ["C-Shaft Body A","C-Shaft Body B","C-Shaft Body C","C-Shaft Pin A","C-Shft Pin B","C-Shaft Pin C"] },
+    { ws: "PRO5",  label: "PRO5",            lines: ["Frame Honing FL","Piston honing FL","Cylinder Honing"] },
+    { ws: "AUX",   label: "辅助/其他",     lines: ["Water Line","True B"] }
+  ];
+  function wsLabelOf(n){ n=String(n||"").toLowerCase().replace(/\s+/g,""); for(var i=0;i<WS_GROUPS.length;i++){ for(var j=0;j<WS_GROUPS[i].lines.length;j++){ if(String(WS_GROUPS[i].lines[j]).toLowerCase().replace(/\s+/g,"")===n) return WS_GROUPS[i].label; } } return "其他"; }
+
+  function getStateRef(){ try { if (window.state) return window.state; } catch(e){} return null; }
+
+  /* ── 上下文采集: 实时(当天/关键线) + 历史 + 问题点 + 车间明细(白夜班/加班/排名) ── */
+  function collectContext() {
+    var out = [];
+    out.push("当前本地时间: " + new Date().toLocaleString("zh-CN", { hour12:false }));
+    var st = getStateRef();
+
+    if (st && st.lines && st.lines.length) {
+      var lines = st.lines.slice().sort(function(a,b){ return (b.cb!==undefined?b.cb:0)-(a.cb!==undefined?a.cb:0); });
+      out.push("\n【当天产出汇总 · 更新时间 " + (st.updatedAt||"-") + "】");
+      lines.forEach(function(l){
+        var nm=l.name, ws=wsLabelOf(nm);
+        var eff=(l.eff!==undefined?l.eff:0); if (typeof eff==="number") eff=eff.toFixed(1);
+        var cb=(l.cb!==undefined?l.cb:(l.plan!==undefined?(l.actual||0)-l.plan:0));
+        out.push("  "+(ws?"["+ws+"]":"[无车间]")+" "+nm+" 目标"+(l.target||"-")+" 计划"+(l.plan||"-")+" 实际"+(l.actual||"-")+" 达成率"+eff+"% 欠产"+(cb>0?"+":"")+cb+(l.status?" "+l.status:""));
+      });
+    } else {
+      out.push("\n(⚠️ 实时数据尚未加载完成)");
+    }
+
+    /* 历史达成率 */
+    var H = window.__HISTORY__;
+    if (H && H.length) {
+      out.push("\n【历史达成率 · 最近" + Math.min(H.length,14) + "天】");
+      H.slice(-14).forEach(function(d){
+        var ls=d.lines||{}; var names=Object.keys(ls);
+        var parts=names.map(function(k){return k+":"+(typeof ls[k]==="number"?ls[k].toFixed(1):ls[k])+"%";});
+        if (parts.length>16){ parts=parts.slice(0,16).concat(["…("+(parts.length-16)+"条线)"]); }
+        out.push("  "+d.date+" — "+parts.join(" , "));
+      });
+    }
+
+    /* 问题点 */
+    var D = window.__LIVE_DATA__;
+    if (D && D.problems && D.problems.length) {
+      out.push("\n【问题点 " + D.problems.length + " 条】");
+      D.problems.slice(0,8).forEach(function(p){
+        out.push("  ["+(p.ws||"")+" "+(p.series||"")+" "+(p.time||"")+"] 计划"+(p.plan||"-")+"/实际"+(p.actual||"-")+"/缺口"+(p.impact||"-")+" — "+(p.problem_zh||p.problem_th||""));
+      });
+    }
+
+    /* 车间明细: 白/夜班产出 + 加班 + 车间排名 (来自 analytics.json) */
+    var AD = (typeof window.__ANA_DAYS__ !== "undefined") ? window.__ANA_DAYS__ : null;
+    if (AD && AD.length) {
+      out.push("\n【车间明细 · 白班/夜班/加班 · 近" + AD.length + "天】");
+      AD.slice(-7).forEach(function(d){
+        var dt=d.day, nt=d.night;
+        out.push("  "+d.date+" 白班 正常"+dt.normal+" 加班"+dt.overtime+" 总"+dt.total+" 达成率"+(dt.attainment==null?"-":dt.attainment)+"%"+" | 夜班 正常"+nt.normal+" 加班"+nt.overtime+" 总"+nt.total+(nt.attainment==null?"":" 达成率"+nt.attainment+"%"));
+        if (d.workshops && d.workshops.length) {
+          var top=d.workshops.slice(0,8).map(function(w){ return w.ws+"总"+w.total+(w.attainment!=null?"("+w.attainment+"%)":""); }).join(" > ");
+          out.push("    车间排名: "+top);
+        }
+      });
+    } else {
+      out.push("\n【车间明细】 (产出分析数据尚未准备好)");
+    }
+
+    out.push("\n(数据为当前已加载快照; 若问任意某日, 从 车间明细 近7天挑选; 更早日期请说明仅能按可得数据回答)");
+    return out.join("\n");
+  }
+
+  /* ── 样式 (移动端全屏) ── */
+  var style = document.createElement("style");
+  style.textContent = "" +
+    "#mAIWidgetPanel{--ai-ink:#14233b;--ai-muted:#718096;--ai-blue:#1d5fd1;--ai-line:#dfe7f2;position:fixed;inset:0;margin:auto;z-index:999999;width:min(1040px,94vw);height:min(84vh,760px);display:none;flex-direction:column;overflow:hidden;background:rgba(247,249,252,.98);border-radius:0;box-shadow:0 24px 80px rgba(5,20,48,.4);font-family:'Segoe UI','Microsoft YaHei',sans-serif;color:var(--ai-ink)}" +
+    "#mAIWidgetPanel *{box-sizing:border-box}#mAIWidgetPanel button{font-family:inherit}" +
+    ".ai-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:linear-gradient(180deg,#0d2343,#1b4d9c);color:#fff}" +
+    ".ai-brand{display:flex;align-items:center;gap:10px;min-width:0}" +
+    ".ai-brand-copy{display:flex;flex-direction:column;min-width:0}.ai-brand-copy small{font-size:9px;letter-spacing:1.4px;font-weight:900;color:#a9c8ff}.ai-brand-copy strong{font-size:15px;line-height:1.2;white-space:nowrap}" +
+    ".ai-head-actions{display:flex;align-items:center;gap:8px}" +
+    ".ai-live-dot{display:flex;align-items:center;gap:6px;color:#d9e8ff;font-size:10px;font-weight:800}.ai-live-dot i{width:7px;height:7px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 4px rgba(74,222,128,.13)}" +
+    ".ai-head-btn{height:32px;padding:0 11px;border:1px solid rgba(255,255,255,.25);border-radius:8px;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;font-size:12px;font-weight:800}.ai-close{width:34px;padding:0;font-size:19px}" +
+    ".ai-chat{display:flex;flex-direction:column;flex:1;min-height:0;background:#fbfcfe}" +
+    ".ai-chat-intro{padding:13px 16px 9px;border-bottom:1px solid #e8edf5;background:rgba(255,255,255,.66)}.ai-chat-intro h3{margin:3px 0 2px;font-size:16px}.ai-chat-intro p{margin:0;color:var(--ai-muted);font-size:11px}" +
+    ".ai-messages{flex:1;min-height:0;overflow-y:auto;padding:13px 15px 16px;background:#fbfcfe}" +
+    ".ai-message{display:flex;gap:9px;align-items:flex-start;margin:0 0 14px}.ai-message.user{flex-direction:row-reverse}" +
+    ".ai-message-avatar{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;border-radius:8px;background:#dbe9fb;color:var(--ai-blue);font-size:10px;font-weight:900}.ai-message.user .ai-message-avatar{background:#1d5fd1;color:#fff}" +
+    ".ai-message-body{display:flex;flex-direction:column;max-width:84%;min-width:0}" +
+    ".ai-message-meta{display:block;margin:1px 0 4px;color:#8a9ab0;font-size:9px;font-weight:800}.ai-message.user .ai-message-meta{text-align:right}" +
+    ".ai-message-bubble{width:fit-content;max-width:100%;padding:11px 14px;border:1px solid #e0e7f1;border-radius:4px 14px 14px 14px;background:#fff;color:#28384e;font-size:13px;line-height:1.7;word-break:break-word;box-shadow:0 3px 10px rgba(31,58,96,.05)}" +
+    ".ai-message-bubble p{margin:0 0 9px}.ai-message-bubble p:last-child{margin-bottom:0}.ai-message-bubble ul{margin:5px 0 9px;padding-left:18px}.ai-message-bubble li{margin:3px 0}" +
+    ".ai-message-bubble .ai-answer-label{color:#1d5fd1;font-weight:900}.ai-message-bubble .ai-answer-divider{height:1px;margin:9px 0;background:#e8edf5}.ai-message-bubble .ai-answer-muted{color:#718096}" +
+    ".ai-message.user .ai-message-bubble{border:0;border-radius:14px 4px 14px 14px;background:#1d5fd1;color:#fff}" +
+    ".ai-composer{padding:10px 12px;border-top:1px solid var(--ai-line);background:rgba(255,255,255,.85)}" +
+    ".ai-composer-box{display:flex;align-items:flex-end;gap:8px;padding:5px;border:1px solid #cbd8e8;border-radius:13px;background:#f9fbfe}" +
+    ".ai-composer textarea{flex:1;min-height:40px;max-height:110px;resize:none;border:0;outline:0;background:transparent;padding:8px;color:var(--ai-ink);font-size:14px;line-height:1.5}.ai-composer textarea::placeholder{color:#94a3b8}" +
+    ".ai-icon-btn,.ai-send-btn{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:10px;cursor:pointer}.ai-icon-btn{border:1px solid #d2ddea;background:#fff;color:#506b8d;font-size:17px}.ai-send-btn{border:0;background:#1d5fd1;color:#fff;font-size:17px}" +
+    "@media (max-width:720px){#mAIWidgetPanel{width:100vw;height:100vh;border-radius:0}.ai-message-body{max-width:86%}.ai-compose-hint{display:none}}";
+  document.head.appendChild(style);
+
+  /* ── DOM ── 顶栏入口 (去 FAB 悬浮按钮) */
+  var fab = document.getElementById("aiBtn");
+
+  var panel = document.createElement("div");
+  panel.id = "mAIWidgetPanel";
+  panel.innerHTML =
+    '<div class="ai-panel-head"><div class="ai-brand"><span class="ai-brand-copy"><small>AI OPERATIONS COPILOT</small><strong>产出经营诊断</strong></span></div><div class="ai-head-actions"><span class="ai-live-dot"><i></i>已加载</span><button id="mAIWidgetReset" class="ai-head-btn">新对话</button><button id="mAIWidgetClose" class="ai-head-btn ai-close">×</button></div></div>' +
+    '<div class="ai-chat"><div class="ai-chat-intro"><h3>围绕当前数据追问</h3><p>先给结论, 再给证据; 数据不足会明确标出。</p></div><div id="mAIWidgetMsgs" class="ai-messages" role="log"></div><div class="ai-composer"><div class="ai-composer-box"><textarea id="mAIWidgetInput" rows="1" placeholder="问: 今天各车间排名? 昨天夜班加班产出? 欠产最多线?"></textarea><button id="mAIWidgetMic" class="ai-icon-btn" title="语音输入">🎤</button><button id="mAIWidgetSend" class="ai-send-btn" title="发送">➤</button></div></div></div>';
+  document.body.appendChild(panel);
+
+  function esc(t){ return String(t==null?"":t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];}); }
+  function fmt(t){
+    var raw=String(t==null?"":t).replace(/\r\n?/g,"\n").trim(); if(!raw) return "<p class=\"ai-answer-muted\">无内容</p>";
+    return raw.split(/\n\s*\n/).map(function(b){
+      var safe=esc(b); var ls=safe.split("\n");
+      var isList=ls.length>0 && ls.every(function(line){ return /^\s*(?:[-*•]|\d+[.)])\s+/.test(line) || !line.trim(); });
+      if(isList) return "<ul>"+ls.filter(function(l){return l.trim();}).map(function(l){return "<li>"+l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/,"")+"</li>";}).join("")+"</ul>";
+      safe=safe.replace(/^(结论|判断|证据|行动|建议|风险)[:：]/m,"<span class=\"ai-answer-label\">$1</span>：");
+      return "<p>"+safe.replace(/\n/g,"<br>")+"</p>";
+    }).join("");
+  }
+  function addMsg(text,who){
+    var m=document.getElementById("mAIWidgetMsgs");
+    var d=document.createElement("div"); d.className="ai-message "+(who==="user"?"user":"ai");
+    d.innerHTML='<span class="ai-message-avatar">'+(who==="user"?"你":"AI")+'</span><span class="ai-message-body"><span class="ai-message-meta">'+(who==="user"?"你":"经营诊断助手")+'</span><span class="ai-message-bubble"></span></span>';
+    d.querySelector(".ai-message-bubble").innerHTML=fmt(text);
+    m.appendChild(d); m.scrollTop=m.scrollHeight;
+    return d;
+  }
+
+  /* 会话记忆 */
+  function loadConv(){ try{ return localStorage.getItem("mAIWidget_convId")||""; }catch(e){ return ""; } }
+  function saveConv(id){ try{ if(id) localStorage.setItem("mAIWidget_convId",id); }catch(e){} }
+  function clearConv(){ try{ localStorage.removeItem("mAIWidget_convId"); }catch(e){} }
+
+  /* 发送 */
+  var busy=false;
+  var sendBtn=document.getElementById("mAIWidgetSend");
+  var input=document.getElementById("mAIWidgetInput");
+  function askAI(q){
+    busy=true; sendBtn.disabled=true; sendBtn.textContent="…";
+    var payload={
+      query:q, context:collectContext(),
+      mode:"pdtiii_operations_diagnosis_v2",
+      response_contract:"先给结论; 再列证据(日期、范围、指标); 再给不超过3项行动。没有数据就明确说未知, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。",
+      conversation_id:loadConv()
+    };
+    var busyMsg=addMsg("🤖 思考中…","ai");
+    fetch(CFG.proxyUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+      .then(function(data){
+        busy=false; sendBtn.disabled=false; sendBtn.textContent="➤";
+        if(busyMsg && busyMsg.parentNode) busyMsg.remove();
+        if(data && data.conversation_id) saveConv(data.conversation_id);
+        var ans=(data && (data.answer||data.reply)) || (data && data.error) || "无响应";
+        addMsg(String(ans),"ai");
+      })
+      .catch(function(e){
+        busy=false; sendBtn.disabled=false; sendBtn.textContent="➤";
+        if(busyMsg && busyMsg.parentNode) busyMsg.remove();
+        addMsg("⚠️ 在线 AI 暂时不可用。("+e.message+")","ai");
+      });
+  }
+  function send(){
+    if(busy) return;
+    var q=input.value.trim(); if(!q) return;
+    addMsg(q,"user"); input.value="";
+    askAI(q);
+  }
+
+  /* 语音 */
+  var mic=document.getElementById("mAIWidgetMic");
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition, rec=null, recording=false;
+  if(!SR){ mic.style.opacity=".4"; mic.title="当前浏览器不支持语音"; } else {
+    rec=new SR(); rec.lang="zh-CN"; rec.interimResults=false; rec.maxAlternatives=1;
+    rec.onresult=function(e){ input.value+=(input.value?"\n":"")+e.results[0][0].transcript; recording=false; mic.textContent="🎤"; mic.style.background="#fff"; };
+    rec.onerror=rec.onend=function(){ recording=false; mic.textContent="🎤"; mic.style.background="#fff"; };
+    mic.addEventListener("click",function(){
+      if(recording){ rec.stop(); return; }
+      try{ rec.start(); recording=true; mic.textContent="🔴"; mic.style.background="#fee2e2"; }catch(e){}
+    });
+  }
+
+  /* 绑定 */
+  fab.addEventListener("click",function(){ panel.style.display="flex"; input.focus(); });
+  document.getElementById("mAIWidgetClose").addEventListener("click",function(){ panel.style.display="none"; });
+  document.getElementById("mAIWidgetReset").addEventListener("click",function(){
+    document.getElementById("mAIWidgetMsgs").innerHTML=""; clearConv();
+    addMsg("👋 已开启新对话。","ai");
+  });
+  sendBtn.addEventListener("click",send);
+  input.addEventListener("keydown",function(e){ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); } });
+
+  addMsg("👋 我是经营诊断助手。可以问: 今天车间排名、昨天白班/夜班产出、加班产出、欠产最多的线、某日达成率等。","ai");
+})();
+</script>
+
 <!-- ★ 2026-09-03 PWA: 添加到主屏幕后全屏独立运行; SW 网络优先, 不缓存 Firebase 数据/live-data.js -->
 <script>
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
