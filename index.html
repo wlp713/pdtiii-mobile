@@ -2161,8 +2161,14 @@
       conversation_id:loadConv(), stream:true
   };
     var busyMsg=addMsg("正在分析…","ai");
-    var liveBubbleEl=null;
-    function _liveBubble(){ if(liveBubbleEl) return liveBubbleEl; if(busyMsg&&busyMsg.parentNode)busyMsg.parentNode.removeChild(busyMsg); busyMsg=null; liveBubbleEl=addMsg("","ai"); return liveBubbleEl; }
+    var fullAnswer="";   // ★ 累积完整回答
+    // ★ DOM 定位最后一条 AI 气泡并复用(不依赖闭包缓存, 杜绝每块新建气泡)
+    function _liveBubble(){
+      var ms=document.getElementById("mAIWidgetMsgs");
+      for(var i=ms.children.length-1;i>=0;i--){ if(ms.children[i].className.indexOf("user")<0) return ms.children[i].querySelector(".ai-message-bubble"); }
+      addMsg("","ai");
+      return ms.lastElementChild.querySelector(".ai-message-bubble");
+    }
     var ctrl=(typeof AbortController!=="undefined")?new AbortController():null;
     var tmo=ctrl?setTimeout(function(){ctrl.abort();},120000):null;
     function clearT(){ if(tmo){clearTimeout(tmo);tmo=null;} }
@@ -2178,7 +2184,7 @@
               var ln=lines[i].trim(); if(!ln.startsWith("data:"))continue;
               var j=ln.slice(5).trim(); if(!j||j==="[DONE]")continue;
               try{ var o=JSON.parse(j);
-                if(o.event==="agent_message"&&typeof o.answer==="string") _liveBubble().querySelector(".ai-message-bubble").innerHTML=fmt(o.answer);
+                if(o.event==="agent_message"&&typeof o.answer==="string"){ fullAnswer+=o.answer; _liveBubble().innerHTML=fmt(fullAnswer); }
                 if(o.conversation_id)cidSav=o.conversation_id;
                 if(o.event==="message_end"){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); if(reader.cancel)reader.cancel().catch(function(){}); return; }
               }catch(e){}
@@ -2324,7 +2330,7 @@
 <!-- ★ 2026-09-03 PWA: 添加到主屏幕后全屏独立运行; SW 网络优先, 不缓存 Firebase 数据/live-data.js -->
 <script>
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('./sw.js?v=6').catch(function () {});
+  navigator.serviceWorker.register('./sw.js?v=7').catch(function () {});
 }
 </script>
 </body>
