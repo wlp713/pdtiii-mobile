@@ -1300,7 +1300,11 @@
       //   与 今日后半夜(30..470), 直排日历分钟 → 数值序 [30..470,1230..1410] 与真实时间序颠倒,
       //   后半夜边界查询会拿前半夜更低值触发换班清零外推 → 错乱。改为把后半夜桶 +1440 归一化回班次日序。
       var post = (dayOff===-1);
-      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; var m2=snapMins(sn); if (post && m2<NIGHT_END) m2+=1440; pts.push({ m:m2, v:usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0) }); }
+      // ★ 2026-09-14 修复(与桌面 40a228d 同根因): 白班查询过滤掉其它班次的桶(今晨夜班残留 actual=0 桶 + 昨日前半夜桶),
+      //   否则 hValueAt 命中这些零桶触发换班清零外推, 把白班第一段差分值抹成 0。只在真实白班时段生效, 夜班不动。
+      var nowMi = bkkMin();
+      var isDayQry = (dayOff===0) && nowMi >= 8*60 && nowMi < NIGHT_START;
+      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; var m2=snapMins(sn); if (post && m2<NIGHT_END) m2+=1440; if (isDayQry && !(m2>=8*60 && m2<=DAY_END)) continue; pts.push({ m:m2, v:usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0) }); }
       pts.sort(function(a,b){ return a.m-b.m; });
       var tAbs = t; // 查询边界直接用班次日分钟 (day 同制)
       var lo=null, hi=null, hiN=null;
@@ -2283,7 +2287,7 @@
 <!-- ★ 2026-09-03 PWA: 添加到主屏幕后全屏独立运行; SW 网络优先, 不缓存 Firebase 数据/live-data.js -->
 <script>
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('./sw.js?v=2').catch(function () {});
+  navigator.serviceWorker.register('./sw.js?v=3').catch(function () {});
 }
 </script>
 </body>

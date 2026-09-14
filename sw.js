@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-shell-v2';
+var CACHE = 'pdtiii-mobile-shell-v3';
 var CORE = [
   './',
   './index.html',
