@@ -2158,12 +2158,37 @@
       query:q, context:collectContext(q),
       mode:"pdtiii_operations_diagnosis_v2",
       response_contract:"先给结论; 再列证据(日期、班次、车间/线体、正常段、加班段、合计); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/车间/线体/正常产出/加班产出/合计/达成率)。没有数据就明确说未知或缺失, 不要把缺失当作0, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。回答任意日期、白班、夜班、车间或线体问题时, 必须优先从 精确查询结果 读取对应日期 + 班次 + 成品线的独立数值; 页面当前选择的日期不构成查询范围, 不要说只能看到当前日期。只允许使用成品归档口径; 若归档质量为 partial/unknown 或字段为缺失, 必须明确标注数据质量，不得用其他工序产量补齐。",
-      conversation_id:loadConv()
+      conversation_id:loadConv(), stream:true
   };
     var busyMsg=addMsg("正在分析…","ai");
-    fetch(CFG.proxyUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
-      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
-      .then(function(data){
+    var liveBubbleEl=null;
+    function _liveBubble(){ if(liveBubbleEl) return liveBubbleEl; if(busyMsg&&busyMsg.parentNode)busyMsg.parentNode.removeChild(busyMsg); busyMsg=null; liveBubbleEl=addMsg("","ai"); return liveBubbleEl; }
+    var ctrl=(typeof AbortController!=="undefined")?new AbortController():null;
+    var tmo=ctrl?setTimeout(function(){ctrl.abort();},120000):null;
+    function clearT(){ if(tmo){clearTimeout(tmo);tmo=null;} }
+    fetch(CFG.proxyUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal:ctrl?ctrl.signal:undefined})
+      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status);
+        if(r.body&&r.body.getReader&&payload.stream){
+          var reader=r.body.getReader(), dec=new TextDecoder(), acc="", cidSav="";
+          function flush(){ return reader.read().then(function(x){
+            if(x.done){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); return; }
+            acc+=dec.decode(x.value,{stream:true});
+            var lines=acc.split("\n"); acc=lines.pop();
+            for(var i=0;i<lines.length;i++){
+              var ln=lines[i].trim(); if(!ln.startsWith("data:"))continue;
+              var j=ln.slice(5).trim(); if(!j||j==="[DONE]")continue;
+              try{ var o=JSON.parse(j);
+                if(o.event==="agent_message"&&typeof o.answer==="string") _liveBubble().querySelector(".ai-message-bubble").innerHTML=fmt(o.answer);
+                if(o.conversation_id)cidSav=o.conversation_id;
+                if(o.event==="message_end"){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); if(reader.cancel)reader.cancel().catch(function(){}); return; }
+              }catch(e){}
+            }
+            return flush();
+          });}
+          return flush();
+        }
+        return r.json(); })
+      .then(function(data){ if(!data)return;
         setBusy(false);
         if(busyMsg && busyMsg.parentNode) busyMsg.remove();
         if(data && data.conversation_id) saveConv(data.conversation_id);
@@ -2299,7 +2324,7 @@
 <!-- ★ 2026-09-03 PWA: 添加到主屏幕后全屏独立运行; SW 网络优先, 不缓存 Firebase 数据/live-data.js -->
 <script>
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('./sw.js?v=5').catch(function () {});
+  navigator.serviceWorker.register('./sw.js?v=6').catch(function () {});
 }
 </script>
 </body>
