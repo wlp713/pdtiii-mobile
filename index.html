@@ -1189,6 +1189,19 @@
     var m = normName(name);
     return m === "motorhseries" || m === "motorh-series";
   }
+  // ★ 2026-09-14: Final 线同样启用前端手工目标(数据端偶发桶计划倒挂/突变 → 用日目标前后端遮罩)
+  function isManualFinalLine(name){ return !!FINAL_SET[normName(name)]; }
+  // 手动目标值: H线钉 1800; Final 线用数据日目标(l.target), 无则退回原始计划。
+  function hManualTargetFor(l, curTarget){
+    if (isManualHLine(l && l.name)) return H_MANUAL_TARGET;
+    if (isManualFinalLine(l && l.name)){
+      var t = Number(curTarget);
+      if (t > 0) return t;
+      t = Number(l && l.target);
+      if (t > 0) return t;
+    }
+    return 0; // 非手动线 → 0=不改用前端曲线
+  }
   function hManualNormalMins(shift){
     var table = shift === "night" ? NIGHT_SEGS : DAY_SEGS;
     var otStart = shift === "night" ? OT_NIGHT_START : OT_DAY_START;
@@ -1200,11 +1213,13 @@
     }
     return m;
   }
-  function hManualPlanAt(shift, t){
+  // ★ 2026-09-14: 目标量参数化 — H线 用 1800; Final 线用数据端日目标(手动避让倒挂桶)。
+  function hManualPlanAt(shift, t, target){
+    target = (target && target > 0) ? target : H_MANUAL_TARGET;
     var table = shift === "night" ? NIGHT_SEGS : DAY_SEGS;
     var otStart = shift === "night" ? OT_NIGHT_START : OT_DAY_START;
     var nm = hManualNormalMins(shift) || 1;
-    var pace = H_MANUAL_TARGET / nm;
+    var pace = target / nm;
     var cum = 0;
     for (var i=0;i<table.length;i++){
       var t0=table[i][0], t1=table[i][1];
@@ -1223,13 +1238,13 @@
     }
     return Math.round(cum+ot);
   }
-  // 对单条 line 应用手动覆盖（同步电脑端 loadMain 的做法）：锁定 target=1800、plan=实时累计手目标、eff/cb 重算
+  // 对单条 line 应用手动覆盖（同步电脑端 loadMain 的做法）：锁 target、plan=实时累计手目标、eff/cb 重算
   function applyManualHLine(l){
     if (!isManualHLine(l.name)) return;
     var sc = shiftSegAt(bkkMin());
     var isNight = sc.shift === "night";
     var nowM = (isNight && bkkMin()<NIGHT_END) ? bkkMin()+1440 : bkkMin();
-    var mp = hManualPlanAt(sc.shift, nowM);
+    var mp = hManualPlanAt(sc.shift, nowM, H_MANUAL_TARGET);
     l.target = H_MANUAL_TARGET;
     l.plan = mp;
     var a = Number(l.actual)||0;
@@ -1340,7 +1355,7 @@
     return false;
   }
   // 本班次已开始段: 每段产量 = 段末累计 − 段初累计 (开班首段从0; 跨换班清零差分<0 → 取段末值)
-  function segsOfHour(name, curActual, curPlan){
+  function segsOfHour(name, curActual, curPlan, curTarget){
     var nowMins = bkkMin();
     var sc = shiftSegAt(nowMins);
     var segs = [], isNight = sc.shift === "night";
@@ -1348,7 +1363,35 @@
     var endCap = isNight ? NIGHT_END+24*60 : DAY_END;
     var postMid = isNight && nowMins < NIGHT_END;   // 凌晨0-8点属夜班次日
     var cmpMins = postMid ? nowMins+24*60 : nowMins;
-    for (var k2=0;k2<table.length;k2++){
+    var firstIdx = 0;
+    // ★ 2026-09-14 夜班折叠(同步电脑端): 无前半夜[1230,1440)桶时前4段边界不可解析
+    //   → 折叠成一根「前半夜」基准段(值=00:30累计=前半夜整段), 避免 seg1=整夜累计巨柱 + seg2/3=0。
+    if (postMid){
+      var preArr = (state.hourly||{})[hourlyKeyOf(name)] || null;
+      var hasPreMid = false;
+      // ★ 2026-09-15 修复: hasPreMid 必须按当前班里日(d)过滤 — 旧桶(其它日期的)不能算有前半夜覆盖,
+      //   否则整夜累计会被塞进 seg1(巨柱)+ seg2/3=0。与 hValueAt 的 d 过滤口径完全一致。
+      var _b0d=bkkDay0()-(bkkMin()<8*60?86400000:0), _bpd=bkkParts(_b0d),
+          _curD=_bpd.y+"-"+("0"+_bpd.M).slice(-2)+"-"+("0"+_bpd.D).slice(-2);
+      if (preArr && preArr.length){
+        for (var _i=0;_i<preArr.length;_i++){ var _sn2=preArr[_i]; var _m2=snapMins(_sn2);
+          if (_m2>=1230 && _m2<1440){
+            var _dd=String(_sn2.d==null?"":_sn2.d);
+            if (_dd==="" || _dd===_curD){ hasPreMid=true; break; }
+          } }
+      }
+      if (!hasPreMid){
+        var bA = Math.max(0, hValueAt(name, 1470, false, -1)); // 00:30 累计实际 = 前半夜整段
+        var bP = Math.max(0, hValueAt(name, 1470, true, -1));  // 00:30 累计目标
+        segs.push({ h:1470/60, lab:null, live:false, base:true, nightBase:true, pm:false, actual:bA, plan:bP, t0:NIGHT_START, t1:1470 });
+        firstIdx = 4; // 跳过已折叠 seg1-4
+      }
+    }
+    // 手动目标: H线钉1800 / Final用日目标; 仅手动线走前端递增曲线, 其它线仍读快照桶(等价前端)。
+    var _tl = lineOf(name);
+    var manualTgt = hManualTargetFor(_tl, curTarget);
+    var manual = manualTgt > 0;
+    for (var k2=firstIdx;k2<table.length;k2++){
       var t0=table[k2][0], t1=table[k2][1];
       if (t0 >= cmpMins || t0 >= endCap) break;
       var first = (k2===0), off = postMid ? -1 : 0;
@@ -1356,11 +1399,14 @@
       if (!live && !segHasData(name, t0, t1, off)) continue; // 无当天数据的前半夜段不画, 避免垃圾值
       var a0 = first ? 0 : hValueAt(name, t0, false, off);
       var a1 = (t1 > cmpMins) ? (Number(curActual)||0) : hValueAt(name, t1, false, off);
-      var p0 = first ? 0 : hValueAt(name, t0, true, off);
-      var p1 = (t1 > cmpMins) ? (Number(curPlan)||0) : hValueAt(name, t1, true, off);
+      var p0 = first ? 0 : (manual ? hManualPlanAt(sc.shift, t0, manualTgt) : hValueAt(name, t0, true, off));
+      var p1 = (t1 > cmpMins)
+        ? (manual ? hManualPlanAt(sc.shift, nowMins, manualTgt) : (Number(curPlan)||0))
+        : (manual ? hManualPlanAt(sc.shift, t1, manualTgt) : hValueAt(name, t1, true, off));
       var actual = a1-a0, plan = p1-p0;
-      if (actual < 0) actual = a1;
-      if (plan < 0) plan = p1;
+      // ★ 2026-09-14(同步电脑端): live 段负差 = 实时值与定格桶不同步 → 归 0 不撑爆; 非 live 保持换班清零兜底
+      if (actual < 0) actual = live ? 0 : a1;
+      if (plan < 0) plan = live ? 0 : p1;
       segs.push({ h:t1/60, lab:k2+1, live:live, actual:Math.max(0,actual), plan:Math.max(0,plan), t0:t0, t1:t1 });
     }
     return segs;
