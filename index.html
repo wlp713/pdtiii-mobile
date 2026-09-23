@@ -1179,10 +1179,10 @@
   function shiftSegAt(mins){ var s=segFor(mins); if (s) return s; return {shift:"day",idx:1,t0:8*60,t1:DAY_SEGS[0][1]}; }
 
   // ★ 2026-09-09 手动目标覆盖（同步电脑端）：仅 Motor H-Series 一条线
-  //   正常工作时间目标钉死 1800；加班目标按同样速率继续推移。覆盖 plan/target/eff/cb。
-  //   口径: 目标在加班起点(白班17:20/夜班5:50)正好推到 1800, 之后按 pace 继续累加。
+  //   2026-09-23 按用户要求: H 到下午 17:20(8H) 目标 = 1500, 之后加班按同样速率继续推移。
+  //   口径: 目标在加班起点(白班17:20/夜班5:50)正好推到 1500, 之后按 pace 继续累加。
   //   注: 手机端 normName 只去空格(同电脑端早上线前的定义), "Motor H-Series"→"motorhseries"命中。
-  var H_MANUAL_TARGET = 1800;
+  var H_MANUAL_TARGET = 1500;
   var OT_DAY_START = 17*60+20;                 // 白班加班起点 17:20
   var OT_NIGHT_START = 5*60+50+1440;           // 夜班加班起点 5:50 (跨天基准)
   function isManualHLine(name){
