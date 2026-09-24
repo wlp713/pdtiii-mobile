@@ -1279,6 +1279,7 @@
   // 按线分派计划曲线: S/F → 方案A(班末满); H/Final → 17:20推满+加班推移(old)
   function manualPlanAtLine(name, shift, t, tgt){
     if (isManualSLine(name) || isManualFLine(name)) return hManualPlanAtA(shift, t, tgt);
+    if (isPro4PinLine(name)) return hManualPlanAtA(shift, t, tgt); // 方案A: 班末推满到目标(合计7000)
     return hManualPlanAt(shift, t, tgt);
   }
   // 对单条 line 应用手动覆盖(同步电脑端 loadMain 的做法): 仅 S/F/H 三线; Final 用数据端目标。锁 target、plan=实时累计手目标、eff/cb 重算
