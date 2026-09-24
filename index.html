@@ -1277,6 +1277,13 @@
   }
   // ★ 2026-09-14: Final 线同样启用前端手工目标(数据端偶发桶计划倒挂/突变 → 用日目标前后端遮罩)
   function isManualFinalLine(name){ return !!FINAL_SET[normName(name)]; }
+  // ★ 2026-09-24 Final C 专属: 白班到 17:00(第1020分钟)累计目标=3000, 之后按相同速率推移到班末
+  var FINAL_C_DAY_ANCHOR = 17 * 60;          // 白班锚点 17:00 (分钟)
+  var FC_MANUAL_TARGET = 3000;              // Final C: 17:00 前累计目标 3000 (之后推移)
+  function isFinalCLine(name){
+    var m = normName(name);
+    return m === "finalcline";
+  }
   // ★ 2026-09-24: PRO4·Body/Pin 的 C-Shaft Pin A + C-Shft Pin B 合计目标 7000(按原比例拆分, 同步电脑端)
   function isPro4PinLine(name){
     var m = normName(name);
@@ -1290,6 +1297,8 @@
     if (isPro4PinLine(l && l.name)){
       return normName(l.name) === "c-shaftpina" ? 3411 : 3589;
     }
+    // ★ 2026-09-24 Final C: 白班到 17:00 累计目标 3000(专属锚点), 覆盖数据端目标
+    if (isFinalCLine(l && l.name)) return FC_MANUAL_TARGET;
     if (isManualFinalLine(l && l.name)){
       var t = Number(curTarget);
       if (t > 0) return t;
@@ -1352,15 +1361,42 @@
     }
     return Math.round(cum);
   }
-  // 按线分派计划曲线: S/F → 方案A(班末满); H/Final → 17:20推满+加班推移(old)
+  // ★ 2026-09-24 Final C 专属曲线: 白班到 17:00(第1020分钟)累计目标=3000, 之后按相同速率推移到班末。
+  //   速率 = 3000 / (17:00 前的工作分钟数); 17:00 后继续以同速率累加(不再停在 3000, 而是推满班末)。
+  //   夜班仍用通用 old 锚点逻辑(加班起点 5:50 推满 + 推移), 目标同为 3000。
+  function hFinalCPlanAt(shift, t, target){
+    var TGT = target || FC_MANUAL_TARGET;
+    var table = shift === "night" ? NIGHT_SEGS : DAY_SEGS;
+    if (shift === "night"){
+      return hManualPlanAt(shift, t, TGT);   // 夜班: 复用 old 锚点(5:50 加班起点推满 3000 + 之后推移)
+    }
+    var anchor = FINAL_C_DAY_ANCHOR;          // 1700
+    var nm = 0;                               // 17:00 前的工作分钟
+    for (var i=0;i<table.length;i++){
+      var t0=table[i][0], t1=table[i][1];
+      if (t0 >= anchor) break;
+      nm += Math.min(t1, anchor) - t0;
+    }
+    var pace = TGT / (nm || 1);
+    var cum = 0;
+    for (var i=0;i<table.length;i++){
+      var t0=table[i][0], t1=table[i][1];
+      if (t0 >= t) break;
+      var e = Math.min(t, t1);
+      if (e > t0) cum += (e - t0) * pace;
+    }
+    return Math.round(cum);
+  }
+  // 按线分派计划曲线: S/F → 方案A(班末满); H/Final → 17:20推满+加班推移(old); Final C → 白班17:00锚定3000后推移
   function manualPlanAtLine(name, shift, t, tgt){
     if (isManualSLine(name) || isManualFLine(name)) return hManualPlanAtA(shift, t, tgt);
     if (isPro4PinLine(name)) return hManualPlanAtA(shift, t, tgt); // 方案A: 班末推满到目标(合计7000)
+    if (isFinalCLine(name)) return hFinalCPlanAt(shift, t, tgt);   // Final C: 白班17:00锚定3000后推移
     return hManualPlanAt(shift, t, tgt);
   }
   // 对单条 line 应用手动覆盖(同步电脑端 loadMain 的做法): 仅 S/F/H 三线; Final 用数据端目标。锁 target、plan=实时累计手目标、eff/cb 重算
   function applyManualHLine(l){
-    if (!isManualHLine(l.name) && !isManualSLine(l.name) && !isManualFLine(l.name) && !isPro4PinLine(l.name)) return;
+    if (!isManualHLine(l.name) && !isManualSLine(l.name) && !isManualFLine(l.name) && !isPro4PinLine(l.name) && !isFinalCLine(l.name)) return;
     var sc = shiftSegAt(bkkMin());
     var isNight = sc.shift === "night";
     var nowM = (isNight && bkkMin()<NIGHT_END) ? bkkMin()+1440 : bkkMin();
