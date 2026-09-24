@@ -655,9 +655,12 @@
     for (var j=0;j<nb.length;j++){ var ov2 = ne - nb[j][0]; if (ov2>0) ne -= Math.min(nb[j][1]-nb[j][0], ov2); }
     return Math.max(0,ne)/60;
   }
-  // UPPH 值 = 产量 ÷ 人数 ÷ 净工时 (True UPPH, 非达成率%)。人数或工时缺失 → null
-  function uphOf(l, now){ var n = headOf(l.name); if (!n) return null; var w = workedHours(now); if (!w) return null; return (Number(l.actual)||0)/n/w; }
+  // UPH = 产量 ÷ 净工时 (卡片上展示, 不含人数)
+  function uphOf(l, now){ var w = workedHours(now); if (!w) return null; return (Number(l.actual)||0)/w; }
   function uphTxt(l, now){ var u = uphOf(l, now); return u==null ? "-" : fmt1(u); }
+  // UPPH = 产量 ÷ 人数 ÷ 净工时 (详情页展示, True UPPH 非达成率%)。人数或工时缺失 → null
+  function upphValOf(l, now){ var n = headOf(l.name); if (!n) return null; var w = workedHours(now); if (!w) return null; return (Number(l.actual)||0)/n/w; }
+  function upphValTxt(l, now){ var u = upphValOf(l, now); return u==null ? "-" : fmt1(u); }
   // UPPH达成率 = 实际UPPH ÷ 目标UPPH; 分子分母同除w,n约掉 → 实际÷目标(实时计划) ×100
   function upphRateOf(l, now){
     var n = headOf(l.name), w = workedHours(now);
@@ -893,7 +896,7 @@
         + '<div class="lc-mid"><span>' + T("实际","Act") + ' <b>' + fmt(r) + '</b></span>'
         + '<span>' + T("计划","Plan") + ' <b>' + fmt(p) + '</b></span>'
         + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span>'
-        + '<span class="lc-uph">UPPH <b>' + uphTxt(l, new Date()) + '</b></span></div>'
+        + '<span class="lc-uph">UPH <b>' + uphTxt(l, new Date()) + '</b></span></div>'
         + '<div class="bar"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
         + '</div>';
     }
@@ -1216,7 +1219,7 @@
     // ── UPPH 人效区块 ──
     $("ldUpphEyebrow").textContent = tr("UPPH 人效","UPPH efficiency");
     $("ldUpphTag").textContent = "UPPH";
-    var uph = uphTxt(l, new Date());        // UPPH 值 = 产量÷人数÷工时
+    var uph = upphValTxt(l, new Date());   // UPPH = 产量÷人数÷工时
     var upr = upphRateOf(l, new Date());    // 达成率%
     $("ldUpphRateLb").textContent = zh?"UPPH":(lang==="th"?"UPPH":"UPPH");
     $("ldUpphRate").textContent = uph;     // 显示 UPPH 值(非%)
