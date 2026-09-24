@@ -491,17 +491,17 @@
       <div class="ld-stat"><div class="lb" id="ldStatDiffLb">Diff</div><div class="val" id="ldStatDiff">-</div><div class="sub" id="ldStatDiffSub">-</div></div>
     </div>
     <div class="sec">
-      <div class="sec-h">👥 <span id="ldUpphEyebrow">UPPH 人效</span> <span class="tag" id="ldUpphTag">UPH</span></div>
+      <div class="sec-h">👥 <span id="ldUpphEyebrow">UPPH 人效</span> <span class="tag" id="ldUpphTag">UPPH</span></div>
       <div class="ld-stats">
-        <div class="ld-stat"><div class="lb" id="ldUpphRateLb">UPPH达成率</div><div class="val" id="ldUpphRate">-</div><div class="sub" id="ldUpphRateSub">-</div></div>
-        <div class="ld-stat"><div class="lb" id="ldUphLb">UPH</div><div class="val blue" id="ldUph">-</div><div class="sub" id="ldUphSub">-</div></div>
+        <div class="ld-stat"><div class="lb" id="ldUpphRateLb">UPPH</div><div class="val blue" id="ldUpphRate">-</div><div class="sub" id="ldUpphRateSub">-</div></div>
+        <div class="ld-stat"><div class="lb" id="ldUphLb">达成率</div><div class="val" id="ldUph">-</div><div class="sub" id="ldUphSub">-</div></div>
       </div>
       <div class="head-edit">
         <span class="he-lb" id="ldHeadLb">人数(headcount)</span>
         <input id="ldHeadInp" type="number" min="0" step="1" inputmode="numeric">
         <button class="he-save" id="ldHeadSave">✓</button>
       </div>
-      <p class="he-hint" id="ldHeadHint">UPH = 产量 ÷ 工时; UPPH达成率 = 实际÷目标。人数可改，自动保存生效。</p>
+      <p class="he-hint" id="ldHeadHint">UPPH = 产量 ÷ 人数 ÷ 工时。人数可改，自动保存生效。</p>
     </div>
     <div class="sec">
       <div class="sec-h"><span class="ld-segs-eyebrow" id="ldSegsEyebrow">Hourly segments</span> <span class="tag" id="ldSegsTag">day</span></div>
@@ -655,7 +655,8 @@
     for (var j=0;j<nb.length;j++){ var ov2 = ne - nb[j][0]; if (ov2>0) ne -= Math.min(nb[j][1]-nb[j][0], ov2); }
     return Math.max(0,ne)/60;
   }
-  function uphOf(l, now){ var w = workedHours(now); if (!w) return null; return (Number(l.actual)||0)/w; }
+  // UPPH 值 = 产量 ÷ 人数 ÷ 净工时 (True UPPH, 非达成率%)。人数或工时缺失 → null
+  function uphOf(l, now){ var n = headOf(l.name); if (!n) return null; var w = workedHours(now); if (!w) return null; return (Number(l.actual)||0)/n/w; }
   function uphTxt(l, now){ var u = uphOf(l, now); return u==null ? "-" : fmt1(u); }
   // UPPH达成率 = 实际UPPH ÷ 目标UPPH; 分子分母同除w,n约掉 → 实际÷目标(实时计划) ×100
   function upphRateOf(l, now){
@@ -892,7 +893,7 @@
         + '<div class="lc-mid"><span>' + T("实际","Act") + ' <b>' + fmt(r) + '</b></span>'
         + '<span>' + T("计划","Plan") + ' <b>' + fmt(p) + '</b></span>'
         + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span>'
-        + '<span class="lc-uph">UPH <b>' + uphTxt(l, new Date()) + '</b></span></div>'
+        + '<span class="lc-uph">UPPH <b>' + uphTxt(l, new Date()) + '</b></span></div>'
         + '<div class="bar"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
         + '</div>';
     }
@@ -1214,22 +1215,23 @@
     }
     // ── UPPH 人效区块 ──
     $("ldUpphEyebrow").textContent = tr("UPPH 人效","UPPH efficiency");
-    $("ldUpphTag").textContent = (zh?"UPH":(lang==="th"?"UPH":"UPH"));
-    var uph = uphTxt(l, new Date());
-    var upr = upphRateOf(l, new Date());
-    $("ldUpphRateLb").textContent = zh?"UPPH达成率":(lang==="th"?"อัตรา UPPH":"UPPH rate");
-    $("ldUpphRate").textContent = upr==null ? "-" : fmt1(upr)+"%";
-    $("ldUpphRate").className = "val " + (upr==null?"gray":(upr>=100?"green":(upr>=70?"orange":"red")));
-    $("ldUpphRateSub").textContent = tr("实际÷目标","actual ÷ target");
-    $("ldUphLb").textContent = zh?"UPH":(lang==="th"?"ชิ้น/ชม.":"UPH");
-    $("ldUph").textContent = uph;
-    $("ldUphSub").textContent = tr("产量÷工时","output ÷ hours");
+    $("ldUpphTag").textContent = "UPPH";
+    var uph = uphTxt(l, new Date());        // UPPH 值 = 产量÷人数÷工时
+    var upr = upphRateOf(l, new Date());    // 达成率%
+    $("ldUpphRateLb").textContent = zh?"UPPH":(lang==="th"?"UPPH":"UPPH");
+    $("ldUpphRate").textContent = uph;     // 显示 UPPH 值(非%)
+    $("ldUpphRate").className = "val blue";
+    $("ldUpphRateSub").textContent = tr("产量÷人数÷工时","output ÷ headcount ÷ hours");
+    $("ldUphLb").textContent = zh?"达成率":(lang==="th"?"คิดเป็น %":"Rate");
+    $("ldUph").textContent = upr==null ? "-" : fmt1(upr)+"%";
+    $("ldUph").className = "val " + (upr==null?"gray":(upr>=100?"green":(upr>=70?"orange":"red")));
+    $("ldUphSub").textContent = tr("实际÷计划","actual ÷ plan");
     $("ldHeadLb").textContent = zh?"人数 (headcount)":(lang==="th"?"จำนวนคน":"Headcount");
     var hip = $("ldHeadInp");
     hip.value = headOf(l.name) || "";
-    $("ldHeadHint").textContent = zh?"UPH = 产量 ÷ 工时; UPPH达成率 = 实际÷目标。人数可改，保存后自动生效。"
-      : (lang==="th"?"UPH = ผลผลิต ÷ ชั่วโมง; อัตรา UPPH = จริง÷เป้า สแกนได้ เปลี่ยนจำนวนคนและบันทึกอัตโนมัติ"
-        :"UPH = Output ÷ Hours; UPPH rate = Actual ÷ Target. Edit headcount, saved & applied automatically.");
+    $("ldHeadHint").textContent = zh?"UPPH = 产量 ÷ 人数 ÷ 工时。人数可改，保存后自动生效。"
+      : (lang==="th"?"UPPH = ผลผลิต ÷ จำนวนคน ÷ ชั่วโมง เปลี่ยนจำนวนคนแล้วบันทึกอัตโนมัติ"
+        :"UPPH = Output ÷ Headcount ÷ Hours. Edit headcount, saved & applied automatically.");
     hip.onchange = function(){ setHead(ldName, hip.value); renderLineDetail(); };
   }
 
