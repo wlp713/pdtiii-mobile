@@ -177,6 +177,8 @@
   .lc-mid { display:flex; gap:16px; margin-top:6px; font-size:11.5px; color:var(--gray); font-variant-numeric:tabular-nums; }
   .lc-mid b { color:var(--white); font-weight:700; }
   .lc-mid .cb.neg { color:var(--red); } .lc-mid .cb.pos { color:var(--green); }
+  .lc-mid .lc-uph { margin-left:auto; color:var(--blue); }
+  .lc-mid .lc-uph b { color:var(--blue); font-variant-numeric:tabular-nums; }
   .bar { height:6px; border-radius:4px; background:rgba(10,14,23,.6); margin-top:9px; overflow:hidden; box-shadow:inset 0 1px 2px rgba(0,0,0,.4); }
   .bar i { display:block; height:100%; border-radius:4px; background:var(--gray-dim); transition:width .6s cubic-bezier(.4,0,.2,1); position:relative; }
   .bar i::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, rgba(255,255,255,.12), transparent); }
@@ -387,6 +389,13 @@
   .ld-stat .val.green{color:var(--green);} .ld-stat .val.red{color:var(--red);} .ld-stat .val.orange{color:var(--orange);} .ld-stat .val.blue{color:var(--blue);} .ld-stat .val.gray{color:var(--gray);}
   .ld-stat .val.mono{ font-size:18px; }
   .ld-stat .sub { font-size:9.5px; color:var(--gray-dim); margin-top:2px; }
+  .head-edit { display:flex; align-items:center; gap:10px; margin-top:10px; }
+  .head-edit .he-lb { font-size:12px; color:var(--gray); font-weight:700; flex:1; min-width:0; }
+  .head-edit input { width:76px; padding:8px 10px; border-radius:10px; border:1px solid var(--border-strong); background:var(--panel-solid); color:var(--white); font-size:16px; font-weight:700; text-align:center; font-variant-numeric:tabular-nums; }
+  .head-edit input:focus { outline:none; border-color:var(--blue); }
+  .head-edit .he-save { width:38px; height:38px; flex-shrink:0; border-radius:10px; border:none; cursor:pointer; background:var(--blue); color:#fff; font-size:16px; font-weight:800; }
+  .head-edit .he-save:active { transform:scale(.93); }
+  .he-hint { margin-top:7px; font-size:10px; color:var(--gray-dim); }
   /* 逐段产出 (同 8 线宫格) */
   .ld-segs-tit { margin: 2px 2px 8px; font-size:12px; font-weight:800; color:var(--white); display:flex; align-items:center; gap:8px; letter-spacing:.3px; }
   .ld-segs-tit::before{ content:""; width:5px;height:5px;border-radius:50%;background:var(--blue);box-shadow:0 0 8px rgba(90,169,255,.6);}
@@ -480,6 +489,19 @@
       <div class="ld-stat"><div class="lb" id="ldStatActLb">Actual</div><div class="val blue" id="ldStatAct">-</div><div class="sub" id="ldStatActSub">today</div></div>
       <div class="ld-stat"><div class="lb" id="ldStatPlanLb">Plan</div><div class="val orange" id="ldStatPlan">-</div><div class="sub" id="ldStatPlanSub">today</div></div>
       <div class="ld-stat"><div class="lb" id="ldStatDiffLb">Diff</div><div class="val" id="ldStatDiff">-</div><div class="sub" id="ldStatDiffSub">-</div></div>
+    </div>
+    <div class="sec">
+      <div class="sec-h">👥 <span id="ldUpphEyebrow">UPPH 人效</span> <span class="tag" id="ldUpphTag">UPH</span></div>
+      <div class="ld-stats">
+        <div class="ld-stat"><div class="lb" id="ldUpphRateLb">UPPH达成率</div><div class="val" id="ldUpphRate">-</div><div class="sub" id="ldUpphRateSub">-</div></div>
+        <div class="ld-stat"><div class="lb" id="ldUphLb">UPH</div><div class="val blue" id="ldUph">-</div><div class="sub" id="ldUphSub">-</div></div>
+      </div>
+      <div class="head-edit">
+        <span class="he-lb" id="ldHeadLb">人数(headcount)</span>
+        <input id="ldHeadInp" type="number" min="0" step="1" inputmode="numeric">
+        <button class="he-save" id="ldHeadSave">✓</button>
+      </div>
+      <p class="he-hint" id="ldHeadHint">UPH = 产量 ÷ 工时; UPPH达成率 = 实际÷目标。人数可改，自动保存生效。</p>
     </div>
     <div class="sec">
       <div class="sec-h"><span class="ld-segs-eyebrow" id="ldSegsEyebrow">Hourly segments</span> <span class="tag" id="ldSegsTag">day</span></div>
@@ -610,6 +632,40 @@
   function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function fmt(n){ if(n===null||n===undefined||isNaN(n)) return "-"; return Number(n).toLocaleString("en-US"); }
   function fmt1(n){ if(n===null||n===undefined||isNaN(n)) return "-"; return Number(n).toFixed(1); }
+  // ── UPPH 人效 (与电脑端同口径 / 同 key, 跨端人数互通) ──
+  var HEADS_KEY = "pdtiii_heads_v1";
+  var headMap = {};
+  try { headMap = JSON.parse(localStorage.getItem(HEADS_KEY) || "{}") || {}; } catch (e) { headMap = {}; }
+  function headOf(name){ var k = normName(name); return (headMap[k] != null) ? Number(headMap[k]) || 0 : 0; }
+  function setHead(name, v){
+    headMap[normName(name)] = Number(v) || 0;
+    try { localStorage.setItem(HEADS_KEY, JSON.stringify(headMap)); } catch (e) { /* ignore */ }
+  }
+  // 已工作小时(净工时): 白班 8:00-20:20, 夜班 20:30-次日8:00; 休息剔除(同电脑端 v5.27 口径)
+  function workedHours(now){
+    var mins = bkkMin(now ? now.getTime() : Date.now());
+    if (mins >= 8*60 && mins <= 20*60+20) {
+      var w = mins - 8*60, br = [[10*60,10*60+10],[12*60,13*60],[15*60,15*60+10],[17*60,17*60+20]];
+      for (var i=0;i<br.length;i++){ var ov = mins - Math.max(8*60, br[i][0]); if (ov>0) w -= Math.min(br[i][1]-br[i][0], ov); }
+      return Math.max(0,w)/60;
+    }
+    var ne = mins >= 20*60+30 ? mins-(20*60+30) : (mins < 8*60 ? (1440-(20*60+30))+mins : -1);
+    if (ne<0) return 0;
+    var nb = [[120,130],[240,300]];  // 夜班休息 22:30-22:40 / 00:30-01:30
+    for (var j=0;j<nb.length;j++){ var ov2 = ne - nb[j][0]; if (ov2>0) ne -= Math.min(nb[j][1]-nb[j][0], ov2); }
+    return Math.max(0,ne)/60;
+  }
+  function uphOf(l, now){ var w = workedHours(now); if (!w) return null; return (Number(l.actual)||0)/w; }
+  function uphTxt(l, now){ var u = uphOf(l, now); return u==null ? "-" : fmt1(u); }
+  // UPPH达成率 = 实际UPPH ÷ 目标UPPH; 分子分母同除w,n约掉 → 实际÷目标(实时计划) ×100
+  function upphRateOf(l, now){
+    var n = headOf(l.name), w = workedHours(now);
+    if (!n || !w) return null;
+    var planNow = Number(l.plan)||0;
+    if (!planNow) return null;
+    return (Number(l.actual)||0)/planNow*100;
+  }
+  function upphTxt(l, now){ var r = upphRateOf(l, now); return r==null ? "-" : fmt1(r); }
   function shortName(n){ return String(n||"").replace(/ line$/i,"").replace(/-Series$/i,"").trim(); }
   function rateCls(r){ if(r===null||r===undefined||isNaN(r)) return ""; return r>=90?"rate-ok":(r>=70?"rate-warn":"rate-bad"); }
   function T(zhTxt, enTxt){ return tr(zhTxt, enTxt); }
@@ -835,7 +891,8 @@
         + '<div class="lc-rate ' + rc + '">' + (isNaN(e)?"-":e.toFixed(1)+"%") + '</div></div>'
         + '<div class="lc-mid"><span>' + T("实际","Act") + ' <b>' + fmt(r) + '</b></span>'
         + '<span>' + T("计划","Plan") + ' <b>' + fmt(p) + '</b></span>'
-        + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span></div>'
+        + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span>'
+        + '<span class="lc-uph">UPH <b>' + uphTxt(l, new Date()) + '</b></span></div>'
         + '<div class="bar"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
         + '</div>';
     }
@@ -1155,6 +1212,25 @@
     } else {
       fhBox.innerHTML = fhSvg;
     }
+    // ── UPPH 人效区块 ──
+    $("ldUpphEyebrow").textContent = tr("UPPH 人效","UPPH efficiency");
+    $("ldUpphTag").textContent = (zh?"UPH":(lang==="th"?"UPH":"UPH"));
+    var uph = uphTxt(l, new Date());
+    var upr = upphRateOf(l, new Date());
+    $("ldUpphRateLb").textContent = zh?"UPPH达成率":(lang==="th"?"อัตรา UPPH":"UPPH rate");
+    $("ldUpphRate").textContent = upr==null ? "-" : fmt1(upr)+"%";
+    $("ldUpphRate").className = "val " + (upr==null?"gray":(upr>=100?"green":(upr>=70?"orange":"red")));
+    $("ldUpphRateSub").textContent = tr("实际÷目标","actual ÷ target");
+    $("ldUphLb").textContent = zh?"UPH":(lang==="th"?"ชิ้น/ชม.":"UPH");
+    $("ldUph").textContent = uph;
+    $("ldUphSub").textContent = tr("产量÷工时","output ÷ hours");
+    $("ldHeadLb").textContent = zh?"人数 (headcount)":(lang==="th"?"จำนวนคน":"Headcount");
+    var hip = $("ldHeadInp");
+    hip.value = headOf(l.name) || "";
+    $("ldHeadHint").textContent = zh?"UPH = 产量 ÷ 工时; UPPH达成率 = 实际÷目标。人数可改，保存后自动生效。"
+      : (lang==="th"?"UPH = ผลผลิต ÷ ชั่วโมง; อัตรา UPPH = จริง÷เป้า สแกนได้ เปลี่ยนจำนวนคนและบันทึกอัตโนมัติ"
+        :"UPH = Output ÷ Hours; UPPH rate = Actual ÷ Target. Edit headcount, saved & applied automatically.");
+    hip.onchange = function(){ setHead(ldName, hip.value); renderLineDetail(); };
   }
 
   var BKK_OFF = 7*3600*1000;
