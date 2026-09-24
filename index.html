@@ -1201,11 +1201,19 @@
   }
   // ★ 2026-09-14: Final 线同样启用前端手工目标(数据端偶发桶计划倒挂/突变 → 用日目标前后端遮罩)
   function isManualFinalLine(name){ return !!FINAL_SET[normName(name)]; }
-  // 手动目标值: H=1500/S=1600/F=1500; Final 线用数据日目标(l.target), 无则退回原始计划。
+  // ★ 2026-09-24: PRO4·Body/Pin 的 C-Shaft Pin A + C-Shft Pin B 合计目标 7000(按原比例拆分, 同步电脑端)
+  function isPro4PinLine(name){
+    var m = normName(name);
+    return m === "c-shaftpina" || m === "c-shftpinb";
+  }
+  // 手动目标值: H=1500/S=1600/F=1500; Final 线用数据日目标(l.target), 无则退回原始计划; PRO4 Pin 两线钉 3411/3589。
   function hManualTargetFor(l, curTarget){
     if (isManualHLine(l && l.name)) return H_MANUAL_TARGET;
     if (isManualSLine(l && l.name)) return S_MANUAL_TARGET;
     if (isManualFLine(l && l.name)) return F_MANUAL_TARGET;
+    if (isPro4PinLine(l && l.name)){
+      return normName(l.name) === "c-shaftpina" ? 3411 : 3589;
+    }
     if (isManualFinalLine(l && l.name)){
       var t = Number(curTarget);
       if (t > 0) return t;
@@ -1275,7 +1283,7 @@
   }
   // 对单条 line 应用手动覆盖(同步电脑端 loadMain 的做法): 仅 S/F/H 三线; Final 用数据端目标。锁 target、plan=实时累计手目标、eff/cb 重算
   function applyManualHLine(l){
-    if (!isManualHLine(l.name) && !isManualSLine(l.name) && !isManualFLine(l.name)) return;
+    if (!isManualHLine(l.name) && !isManualSLine(l.name) && !isManualFLine(l.name) && !isPro4PinLine(l.name)) return;
     var sc = shiftSegAt(bkkMin());
     var isNight = sc.shift === "night";
     var nowM = (isNight && bkkMin()<NIGHT_END) ? bkkMin()+1440 : bkkMin();
