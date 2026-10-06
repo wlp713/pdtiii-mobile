@@ -2366,10 +2366,14 @@
       saveHist(hist);
     } catch(e){}
   }
-  function askAI(q){
+  var EMPTY_ANSWER_MSG="AI 这次没有返回内容（流式连接已结束，但没有拿到任何内容）。\n\n多为上游模型偶发空返回、并发达上限或额度用尽。\n建议：① 直接再问一次（多数一次就好）；② 仍为空就截图给维护人；③ 换个网络（如手机热点）再试。";   // ★ 2026-10-06 避免只看到“无响应”/卡在“正在分析…”
+  function askAI(q, isRetry){
     setBusy(true);
+    var ctxText="";
+    try { ctxText = collectContext(q); }
+    catch(ctxErr){ ctxText = "（页面上下文构建异常, 已按最小上下文提问: " + ((ctxErr&&ctxErr.message)||ctxErr) + "）"; }   // ★ 2026-10-06 不再静默死掉
     var payload={
-      query:q, context:collectContext(q),
+      query:q, context:ctxText,
       mode:"pdtiii_operations_diagnosis_v2",
       response_contract:"先给结论; 再列证据(日期、班次、车间/线体、正常段、加班段、合计); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/车间/线体/正常产出/加班产出/合计/达成率)。没有数据就明确说未知或缺失, 不要把缺失当作0, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。回答任意日期、白班、夜班、车间或线体问题时, 必须优先从 精确查询结果 读取对应日期 + 班次 + 成品线的独立数值; 页面当前选择的日期不构成查询范围, 不要说只能看到当前日期。只允许使用成品归档口径; 若归档质量为 partial/unknown 或字段为缺失, 必须明确标注数据质量，不得用其他工序产量补齐。",
       conversation_id:loadConv(), stream:true
@@ -2391,16 +2395,16 @@
         if(r.body&&r.body.getReader&&payload.stream){
           var reader=r.body.getReader(), dec=new TextDecoder(), acc="", cidSav="";
           function flush(){ return reader.read().then(function(x){
-            if(x.done){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); return; }
+            if(x.done){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); if(!fullAnswer) _liveBubble().innerHTML=fmt(EMPTY_ANSWER_MSG); return; }
             acc+=dec.decode(x.value,{stream:true});
             var lines=acc.split("\n"); acc=lines.pop();
             for(var i=0;i<lines.length;i++){
               var ln=lines[i].trim(); if(!ln.startsWith("data:"))continue;
               var j=ln.slice(5).trim(); if(!j||j==="[DONE]")continue;
               try{ var o=JSON.parse(j);
-                if(o.event==="agent_message"&&typeof o.answer==="string"){ fullAnswer+=o.answer; _liveBubble().innerHTML=fmt(fullAnswer); }
+                if((o.event==="agent_message"||o.event==="message")&&typeof o.answer==="string"){ fullAnswer+=o.answer; _liveBubble().innerHTML=fmt(fullAnswer); }
                 if(o.conversation_id)cidSav=o.conversation_id;
-                if(o.event==="message_end"){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); if(reader.cancel)reader.cancel().catch(function(){}); return; }
+                if(o.event==="message_end"){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); if(!fullAnswer) _liveBubble().innerHTML=fmt(EMPTY_ANSWER_MSG); if(reader.cancel)reader.cancel().catch(function(){}); return; }
               }catch(e){}
             }
             return flush();
@@ -2412,14 +2416,23 @@
         setBusy(false);
         if(busyMsg && busyMsg.parentNode) busyMsg.remove();
         if(data && data.conversation_id) saveConv(data.conversation_id);
-        var ans=(data && (data.answer||data.reply)) || (data && data.error) || "无响应";
+        var ans=(data && (data.answer||data.reply)) || "";
+        if(!ans){
+          // ★ 2026-10-06 代理 200 但无内容: 自动重试一次; 仍空给出可诊断原因, 不再只显示"无响应"
+          if(!isRetry){ askAI(q, true); return; }
+          var bits="";
+          if(data && data.error) bits += "\n- 代理返回: "+String(data.error).slice(0,160);
+          if(data && data.detail) bits += "\n- 上游原文: "+String(data.detail).slice(0,200);
+          ans="AI 这次没有返回内容（已自动重试 1 次，仍为空）。\n\n多为上游模型偶发空返回、并发达上限或额度用尽。\n建议：① 再问一次；② 仍为空就截图给维护人。"
+            + (bits?("\n\n诊断信息："+bits):"");
+        }
         addMsg(String(ans),"ai");
         persistHist(q);
       })
       .catch(function(e){
         setBusy(false);
         if(busyMsg && busyMsg.parentNode) busyMsg.remove();
-        addMsg("在线 AI 暂时不可用（"+e.message+"）。","ai");
+        addMsg("在线 AI 暂时不可用（"+e.message+"）。\n多为当前网络/DNS 拦截了 AI 代理地址，也可能是代理临时不可用；可换网络(如手机热点)后重试。","ai");
         persistHist(q);
       });
   }
