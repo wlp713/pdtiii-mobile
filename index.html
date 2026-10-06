@@ -1597,6 +1597,11 @@
     var iw=W, ih=H-padT-padB;
     var cx=W/2, bw=30, gap=8;             // 双柱: 左柱中心 cx-gap/2-bw/2 …
     var maxV=Math.max(totPlan, totActual);
+    // ★ 2026-10-06 修复(同步电脑端): 满格基准必须覆盖分段骨架总和, 否则「段值远大于 header 当前值」时
+    //   (夜班下的纯白班线) 每段 ph 溢出画布 → 两柱都被涂满 = 假相等。
+    var _segSum=0;
+    for (var _j=0;_j<segs.length;_j++){ _segSum += Math.max(0, Math.max(segs[_j].actual||0, segs[_j].plan||0)); }
+    if (_segSum>maxV) maxV=_segSum;
     if (maxV<=0) maxV=10;
     maxV = Math.ceil(maxV*1.16/10)*10;     // 顶部留 ~16% 给柱顶数字
     var yb = padT+ih;                       // 柱底基线
