@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-shell-v8'; // 2026-10-07 闭环化上线: 强制旧壳刷新(v7 持旧 index.html, 拿不到新的闭环上下文)
+var CACHE = 'pdtiii-mobile-shell-v7';
 var CORE = [
   './',
   './index.html',
