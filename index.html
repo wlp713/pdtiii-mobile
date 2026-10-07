@@ -1791,6 +1791,32 @@
     document.head.appendChild(s);
   }
 
+  /* ★ 2026-10-07 AI 同步: 每日制程问题点日志(历史) — 与电脑端同源
+     数据源: pdtiii-live 仓库的 daily-problems-data.js(种子快照) + Firebase 实时库(电脑端录入即同步)
+     暴露 window.__DAILY_PROBLEMS__ = { savedAt, byDate:{日期:[条目]}} 供手机端 AI 读取 */
+  var _dpRetry = null;
+  function applyDailyProblems(){
+    var seed = window.__DAILY_PROBLEMS_SEED__ || null;
+    var rem = window.__DAILY_PROBLEMS_REMOTE__ || null;
+    var bd = {};
+    if (seed && seed.byDate) Object.keys(seed.byDate).forEach(function(k){ if (seed.byDate[k] && seed.byDate[k].length) bd[k] = seed.byDate[k]; });
+    if (rem && rem.byDate) Object.keys(rem.byDate).forEach(function(k){ if (rem.byDate[k] && rem.byDate[k].length) bd[k] = rem.byDate[k]; });
+    var sT = Math.max(Number(seed && seed.savedAt || 0), Number(rem && rem.savedAt || 0));
+    window.__DAILY_PROBLEMS__ = { savedAt: sT, byDate: bd };
+    window.__DAILY_PROBLEMS_READY__ = true;
+  }
+  function reloadDailyProblems(){
+    var s = document.createElement("script");
+    s.src = "https://wlp713.github.io/pdtiii-live/daily-problems-data.js?v=mobile" + Date.now();
+    s.onload = function(){ if (_dpRetry){ clearTimeout(_dpRetry); _dpRetry=null; } applyDailyProblems(); };
+    s.onerror = function(){ if (!_dpRetry) _dpRetry = setTimeout(function(){ _dpRetry=null; reloadDailyProblems(); }, 30000); };
+    document.head.appendChild(s);
+    fetch("https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii_daily_problems.json?t=" + Date.now(), { signal: AbortSignal.timeout(8000) })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(rem){ if (rem && rem.byDate) { window.__DAILY_PROBLEMS_REMOTE__ = rem; applyDailyProblems(); } })
+      .catch(function(){});
+  }
+
   /* ── 2026-09-11 AI: 产出分析数据 (analytics.json) ──
      手机端不做产出分析 UI, 但要把白班/夜班/加班/车间排名喂给 AI。
      直接 fetch 洗好的 analytics.json (GitHub Pages 每日快照, CORS开放), 解析出可供 AI 的上下文。 */
@@ -1864,6 +1890,7 @@
     loadMain();
     reloadLiveData(); // 无条件刷新: 回前台立即同步最新 (不能因缓存旧数据就跳过)
     reloadAnalytics(); // 2026-09-11 AI: 同步刷新产出分析数据
+    reloadDailyProblems(); // 2026-10-07 AI: 同步刷新每日制程问题点日志(历史)
   }
 
   /* ── 线体分析视图 · 事件绑定 ── */
@@ -1899,11 +1926,13 @@
   loadMain();
   reloadLiveData(); // 启动无条件拉最新: 覆盖任何可能残留的旧版 live-data.js 缓存
   reloadAnalytics(); // 2026-09-11 AI: 启动拉产出分析数据 (白/夜班/加班/车间排名 供 AI)
+  reloadDailyProblems(); // 2026-10-07 AI: 启动拉每日制程问题点日志(历史), 让手机端 AI 也能查历史异常问题点
 
   setInterval(loadMain, 60000);
   setInterval(drawHourlyLive, 10000); // 小时产出: 每10秒轻刷当前段/图 (chips 不重建)
   setInterval(reloadLiveData, 600000); // 10分钟
   setInterval(reloadAnalytics, 600000); // 2026-09-11 AI: 10分钟同步产出分析快照
+  setInterval(reloadDailyProblems, 600000); // 2026-10-07 AI: 10分钟同步每日制程问题点日志
   document.addEventListener("visibilitychange", function(){
     if (!document.hidden) refreshAll();
   });
@@ -2057,6 +2086,70 @@
       D.problems.slice(0,8).forEach(function(p){
         out.push("  ["+(p.ws||"")+" "+(p.series||"")+" "+(p.time||"")+"] 计划"+(p.plan||"-")+"/实际"+(p.actual||"-")+"/缺口"+(p.impact||"-")+" — "+(p.problem_zh||p.problem_th||""));
       });
+    }
+
+    /* 每日制程问题点日志(历史导入) — 与电脑端同源 (pdtiii-live 的 daily-problems-data.js + Firebase) */
+    var DP = (typeof window.__DAILY_PROBLEMS__ !== "undefined") ? window.__DAILY_PROBLEMS__ : null;
+    if (DP && DP.byDate) {
+      var dpDates = Object.keys(DP.byDate).sort();
+      var dpRows = [];
+      dpDates.forEach(function(dd){ dpRows = dpRows.concat(DP.byDate[dd] || []); });
+      var qRaw = String(q || "").toLowerCase();
+      var dpSelDates = queryDates(q, dpDates.map(function(dd){ return { date: dd }; }));
+      var dpShiftKeys = shiftKeysForQuery(q);
+      var dpShift = (dpShiftKeys.length === 1) ? dpShiftKeys[0] : "full";
+      var dpDeptTok = null;
+      var mDept = qRaw.match(/pro\s*\.?\s*([1-4])/);
+      if (mDept) dpDeptTok = "pro." + mDept[1];
+      else if (/(^|[^a-z])pe([^a-z]|$)/.test(qRaw)) dpDeptTok = "pe";
+      else if (/(^|[^a-z])ip([^a-z]|$)/.test(qRaw)) dpDeptTok = "ip";
+      else if (/(^|[^a-z])qa([^a-z]|$)/.test(qRaw)) dpDeptTok = "qa";
+      else if (/changemodel|modelchang|换型|换模/.test(qRaw)) dpDeptTok = "changemodel";
+      var dpLine = null;
+      var mLine = qRaw.match(/([a-d])\s*线/) || qRaw.match(/final\s*([a-d])\b/) || qRaw.match(/([a-d])\s*line\s/) || qRaw.match(/\bline\s*([a-d])\b/) || qRaw.match(/([a-d])\s*(สาย|ไลน)/);
+      if (mLine) dpLine = mLine[1].toLowerCase();
+      if (dpLine) {
+        out.unshift("⚠️ 最高优先级指令（线体问题）: 本次用户只问 PRO.2 装配车间的 final " + dpLine.toUpperCase() + " 线。本段上下文里实时产出、成品归档、车间明细中出现的一切其他车间同名线（如 C-Shaft Body B、C-Shft Pin B、Welding B 等）都与本问题无关，判定线体问题时一律忽略它们、禁止引用其数据。线体问题只能依据下方【每日制程问题点日志 H 节】中班次首字母=" + dpLine.toUpperCase() + " 的条目作答(dept 为 PRO.2 或未标注都算, 因为问题点只在 PRO.2 装配记录)，按影响数(impact)取最大。若该节显示 0 条命中, 必须先看该节日期的「按日×部门汇总」是否有「-」(未标注部门)行, 不要再断言无数据。");
+      }
+      var dpFiltered = dpRows.filter(function(p){
+        if (dpSelDates.length && dpSelDates.indexOf(String(p.date)) < 0) return false;
+        if (dpShift && dpShift !== "full") { var isN = /NIGHT/i.test(p.shift || ""); if ((dpShift === "night") !== isN) return false; }
+        if (dpLine) {
+          var dv = (p.dept || "").toLowerCase();
+          if (dv && dv !== "pro.2") return false;
+          if ((p.shift || "").toLowerCase().charAt(0) !== dpLine) return false;
+        } else if (dpDeptTok && p.dept) { if ((p.dept || "").toLowerCase() !== dpDeptTok) return false; }
+        return true;
+      });
+      var dpScope = dpLine ? ("线体=" + dpLine.toUpperCase() + "线(PRO.2装配 final " + dpLine.toUpperCase() + "线)")
+        : (dpDeptTok ? ("部门=" + dpDeptTok.toUpperCase())
+        : (dpShift !== "full" ? ("班次=" + (dpShift === "day" ? "白班" : "夜班")) : ""));
+      if (dpSelDates.length) dpScope = "日期=" + dpSelDates.join(",") + (dpScope ? " " + dpScope : "");
+      out.push("\n【每日制程问题点日志 · 历史导入 · 共" + dpDates.length + "天/" + dpRows.length + "条, 本问句命中 " + dpFiltered.length + " 条" + (dpScope ? " (" + dpScope + ")" : "") + "】");
+      out.push("字段: 日期 | 班次(shift, 首字母A/B/C/D=PRO.2装配 final A-D 线)·责任部门(dept) | 影响数(impact, 产出缺口) | 泰语原文描述");
+      out.push("注: dept 为「-」表示该条未标注责任部门; 线体问题按班次首字母匹配, 与 dept 是否标注无关。");
+      var dpSum = {}, dpOrder = [];
+      dpFiltered.forEach(function(p){
+        var k = p.date + "|" + (p.dept || "-");
+        if (!dpSum[k]) { dpSum[k] = { date: p.date, dept: p.dept || "-", n: 0, imp: 0 }; dpOrder.push(k); }
+        dpSum[k].n += 1; dpSum[k].imp += (Number(p.impact) || 0);
+      });
+      dpOrder.sort();
+      if (dpOrder.length) {
+        out.push("按日×部门汇总(条数/影响合计):");
+        dpOrder.slice(0, 40).forEach(function(k){ var s2 = dpSum[k]; out.push("  " + s2.date + " " + s2.dept + " → " + s2.n + "条/" + s2.imp); });
+        if (dpOrder.length > 40) out.push("  …(" + (dpOrder.length - 40) + "个组合省略)");
+      }
+      if (dpFiltered.length) {
+        var dpShown = dpFiltered.length > 500 ? dpFiltered.slice(dpFiltered.length - 500) : dpFiltered;
+        out.push("明细" + (dpShown.length < dpFiltered.length ? "(最近500条, 共" + dpFiltered.length + ")" : ":"));
+        dpShown.forEach(function(p){
+          out.push("  [" + p.date + " " + (String(p.shift || "").replace("-", " ").toUpperCase() || String(p.shiftLabel || "")) + "] " + (p.dept || "-") + " 影响" + (p.impact == null ? "-" : p.impact) + " — " + (p.problem_th || ""));
+        });
+      } else {
+        out.push("本次条件无命中条目(可用日期: " + dpDates.join(", ") + ")。");
+      }
+      out.push("口径: 泰语为原始描述; 责任部门=dept(PE/IP/QA/PRO.1-4/CHANGEMODEL换型); 影响数=该问题造成的产出缺口。用户问'A/B/C/D线'时一律指PRO.2装配车间的final A-D四条线(条目的班次首字母=线体)。回答语言跟随提问语言——泰语提问用泰语原文总结, 中文提问把泰语翻译成中文再分析。");
     }
 
     /* 成品归档总览 + 按问题精确下钻到日期/班次/线体。 */
@@ -2381,7 +2474,7 @@
     var payload={
       query:q, context:ctxText.slice(0,12000),
       mode:"pdtiii_operations_diagnosis_v2",
-      response_contract:"先给结论; 再列证据(日期、班次、车间/线体、正常段、加班段、合计); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/车间/线体/正常产出/加班产出/合计/达成率)。没有数据就明确说未知或缺失, 不要把缺失当作0, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。回答任意日期、白班、夜班、车间或线体问题时, 必须优先从 精确查询结果 读取对应日期 + 班次 + 成品线的独立数值; 页面当前选择的日期不构成查询范围, 不要说只能看到当前日期。只允许使用成品归档口径; 若归档质量为 partial/unknown 或字段为缺失, 必须明确标注数据质量，不得用其他工序产量补齐。",
+      response_contract:"先给结论; 再列证据(日期、班次、车间/线体、正常段、加班段、合计); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/车间/线体/正常产出/加班产出/合计/达成率)。没有数据就明确说未知或缺失, 不要把缺失当作0, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。回答任意日期、白班、夜班、车间或线体问题时, 必须优先从 精确查询结果 读取对应日期 + 班次 + 成品线的独立数值; 页面当前选择的日期不构成查询范围, 不要说只能看到当前日期。只允许使用成品归档口径; 若归档质量为 partial/unknown 或字段为缺失, 必须明确标注数据质量，不得用其他工序产量补齐。当用户问及每日制程问题点（上下文中的【每日制程问题点日志】节）时，必须依据该节内容作答：泰语提问直接用日志中的泰语原文概括，中文提问先把泰语原文翻译成中文再总结；归因时依据『按日×部门汇总』的条数与影响合计，优先影响数(impact)大、出现频次高的问题，不得臆造。当用户询问某线体的最大/主要问题时（A线/B线/C线/D线、final A-D 线）：该线体一律指 PRO.2 装配车间的 final A-D 四条线，线体字母=问题点条目的班次首字母；只能依据【每日制程问题点日志】中该日期、该线体的条目作答，按影响数(impact)排序取最大并翻译其泰语描述，绝不引用其他车间名称相似的同字母线体。",
       conversation_id:loadConv(), stream:true
   };
     var busyMsg=addMsg("正在分析…","ai");
