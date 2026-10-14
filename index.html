@@ -1263,9 +1263,28 @@
   //   2026-09-23 按用户要求: H 到下午 17:20(8H) 目标 = 1500, 之后加班按同样速率继续推移。
   //   口径: 目标在加班起点(白班17:20/夜班5:50)正好推到 1500, 之后按 pace 继续累加。
   //   注: 手机端 normName 只去空格(同电脑端早上线前的定义), "Motor H-Series"→"motorhseries"命中。
-  var H_MANUAL_TARGET = 1500;   // H: 到17:20(8H)目标=1500, 之后加班按同速率推移
-  var S_MANUAL_TARGET = 1600;   // S: 整班总目标(方案A: 均摊整班, 班末=1600)
-  var F_MANUAL_TARGET = 1500;   // F: 整班总目标(方案A: 均摊整班, 班末=1500)
+  // ★ 2026-10-14 手动目标重构: PRO1 五线按「班次」手动目标, 口径=正常工作时段 8H(同步电脑端)
+  //   FL(Motor AC) 白班1600/无夜班 · WL 1600/1600 · H 1800/1800 · F 1600/400 · S 1600/400
+  var PRO1_MANUAL = {
+    "motorac":       { day: 1600, night: 0    },
+    "motorwl":       { day: 1600, night: 1600 },
+    "motorhseries":  { day: 1800, night: 1800 },
+    "motorh-series": { day: 1800, night: 1800 },
+    "motorfseries":  { day: 1600, night: 400 },
+    "motorf-series": { day: 1600, night: 400 },
+    "motorsseries":  { day: 1600, night: 400 },
+    "motors-series": { day: 1600, night: 400 }
+  };
+  function isPro1ManualLine(name){ return Object.prototype.hasOwnProperty.call(PRO1_MANUAL, normName(name)); }
+  function pro1ManualTarget(name, shift){
+    var e = PRO1_MANUAL[normName(name)];
+    if (!e) return null;
+    return shift === "night" ? e.night : e.day;   // night=0 → 无夜班
+  }
+  // 遗留常量(仅作 hManualPlanAt 的默认兜底参数)
+  var H_MANUAL_TARGET = 1800;   // H: 到17:20(8H)目标=1800, 之后加班按同速率推移
+  var S_MANUAL_TARGET = 1600;   // S: 整班总目标(兼容遗留引用)
+  var F_MANUAL_TARGET = 1600;   // F: 整班总目标(兼容遗留引用)
   var OT_DAY_START = 17*60+20;                 // 白班加班起点 17:20
   var OT_NIGHT_START = 5*60+50+1440;           // 夜班加班起点 5:50 (跨天基准)
   function isManualHLine(name){
@@ -1295,7 +1314,9 @@
     return m === "c-shaftpina" || m === "c-shftpinb";
   }
   // 手动目标值: H=1500/S=1600/F=1500; Final 线用数据日目标(l.target), 无则退回原始计划; PRO4 Pin 两线钉 3411/3589。
-  function hManualTargetFor(l, curTarget){
+  // ★ 2026-10-14: PRO1 五线按班次取手工目标(白班/夜班不同); 其余线沿用原逻辑。
+  function hManualTargetFor(l, curTarget, shift){
+    if (isPro1ManualLine(l && l.name)) return pro1ManualTarget(l.name, shift || "day") || 0;
     if (isManualHLine(l && l.name)) return H_MANUAL_TARGET;
     if (isManualSLine(l && l.name)) return S_MANUAL_TARGET;
     if (isManualFLine(l && l.name)) return F_MANUAL_TARGET;
@@ -1394,6 +1415,8 @@
   }
   // 按线分派计划曲线: S/F → 方案A(班末满); H/Final → 17:20推满+加班推移(old); Final C → 白班17:00锚定3400后推移
   function manualPlanAtLine(name, shift, t, tgt){
+    // ★ 2026-10-14: PRO1 五线统一「8H 正常工时推满 + 加班同速率推移」(old 锚点); 目标 0(无夜班) → 计划恒 0。
+    if (isPro1ManualLine(name)) return tgt ? hManualPlanAt(shift, t, tgt) : 0;
     if (isManualSLine(name) || isManualFLine(name)) return hManualPlanAtA(shift, t, tgt);
     if (isPro4PinLine(name)) return hManualPlanAtA(shift, t, tgt); // 方案A: 班末推满到目标(合计7000)
     if (isFinalCLine(name)) return hFinalCPlanAt(shift, t, tgt);   // Final C: 白班17:00锚定3400后推移
@@ -1401,17 +1424,18 @@
   }
   // 对单条 line 应用手动覆盖(同步电脑端 loadMain 的做法): 仅 S/F/H 三线; Final 用数据端目标。锁 target、plan=实时累计手目标、eff/cb 重算
   function applyManualHLine(l){
-    if (!isManualHLine(l.name) && !isManualSLine(l.name) && !isManualFLine(l.name) && !isPro4PinLine(l.name) && !isFinalCLine(l.name)) return;
     var sc = shiftSegAt(bkkMin());
     var isNight = sc.shift === "night";
     var nowM = (isNight && bkkMin()<NIGHT_END) ? bkkMin()+1440 : bkkMin();
-    var mTgt = hManualTargetFor(l, Number(l.target));
-    if (!mTgt) return;
+    var mTgt = hManualTargetFor(l, Number(l.target), sc.shift);
+    // ★ 2026-10-14: PRO1 手工线即使目标为 0(FL 无夜班)也要接管
+    var isManual = isPro1ManualLine(l.name) || mTgt > 0;
+    if (!isManual) return;
     var mp = manualPlanAtLine(l.name, sc.shift, nowM, mTgt);
     l.target = mTgt;
     l.plan = mp;
     var a = Number(l.actual)||0;
-    l.eff = mp>0 ? Math.round(a/mp*1000)/10 : (l.eff==null?null:l.eff);
+    l.eff = mp>0 ? Math.round(a/mp*1000)/10 : null;
     l.cb = a - mp;
   }
   function fmtSegMin(m){ var x=((m%1440)+1440)%1440; return ("0"+Math.floor(x/60)).slice(-2)+":"+("0"+(x%60)).slice(-2); }
@@ -1552,8 +1576,8 @@
     }
     // 手动目标: H线钉1800 / Final用日目标; 仅手动线走前端递增曲线, 其它线仍读快照桶(等价前端)。
     var _tl = lineOf(name);
-    var manualTgt = hManualTargetFor(_tl, curTarget);
-    var manual = manualTgt > 0;
+    var manualTgt = hManualTargetFor(_tl, curTarget, sc.shift);
+    var manual = isPro1ManualLine(name) || manualTgt > 0;
     for (var k2=firstIdx;k2<table.length;k2++){
       var t0=table[k2][0], t1=table[k2][1];
       if (t0 >= cmpMins || t0 >= endCap) break;
