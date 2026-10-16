@@ -558,6 +558,24 @@
   }
   var MAIN_LINES = ["Final A line","Final B Line","Final C line","Final D line","Motor H-Series","Motor S-Series","Motor F-Series","Motor WL"];
   function normName(n){ return String(n||"").toLowerCase().replace(/\s+/g,""); }
+  /* ★ 2026-10-16 线体改名: 电机的 AC 线 → "Motor FL" (数据端/库里仍叫 Motor AC, 前端入口统一改键) */
+  var NAME_ALIAS = { "motorac": "Motor FL" };
+  function aliasName(n){ var a = NAME_ALIAS[normName(n)]; return a || n; }
+  function aliasMapKeys(o){
+    if (!o || typeof o !== "object") return o;
+    var r = {}; Object.keys(o).forEach(function(k){ r[aliasName(k)] = o[k]; }); return r;
+  }
+  function aliasLiveData(){
+    try {
+      if (Array.isArray(window.__HISTORY__)) window.__HISTORY__.forEach(function(d){
+        if (!d) return;
+        if (d.lines) d.lines = aliasMapKeys(d.lines);
+        if (d.first_hour) d.first_hour = aliasMapKeys(d.first_hour);
+      });
+      var ld = window.__LIVE_DATA__;
+      if (ld && Array.isArray(ld.first_hour)) ld.first_hour.forEach(function(e){ if (e && e.line) e.line = aliasName(e.line); });
+    } catch (e) {}
+  }
   var MAIN_SET = {};
   MAIN_LINES.forEach(function(l){ MAIN_SET[normName(l)] = true; });
 
@@ -565,7 +583,7 @@
   //   Pro1=Motor6 / Pro2行1=Rotor+Final8 / Pro2行2=Shipping(=Inspection)4 / Pro3=Welding4
   //   Pro4行1=Frame No.1-5+Hon/Pist / Pro4行2=Body/Pin / Pro5=Frame/Piston/Cylinder Honing
   var WS_GROUPS = [
-    { ws: "PRO1",   label: "PRO1",            lines: ["Motor AC", "Motor CL", "Motor WL", "Motor F-Series", "Motor H-Series", "Motor S-Series"] },
+    { ws: "PRO1",   label: "PRO1",            lines: ["Motor FL", "Motor CL", "Motor WL", "Motor F-Series", "Motor H-Series", "Motor S-Series"] },
     { ws: "PRO2R",  label: "PRO2·Rotor/Fin",  lines: ["Final A line", "Final B Line", "Final C line", "Final D line", "Rotor A line", "Rotor B Line", "Rotor C line", "Rotor D Line"] },
     { ws: "PRO2S",  label: "PRO2·Shipping",   lines: ["Inspection A", "Inspection B", "Inspection C", "Inspection D"] },
     { ws: "PRO3",   label: "PRO3",            lines: ["Welding A line", "Welding B line", "Welding C line", "Welding D line"] },
@@ -959,6 +977,7 @@
   function renderFirstHour(){
     var ld = window.__LIVE_DATA__ || {};
     var fh = (ld.first_hour || []).slice().sort(function(a,b){ return (Number(b.rate)||-1)-(Number(a.rate)||-1); });
+    fh.forEach(function(e){ if (e && e.line) e.line = aliasName(e.line); });
     var sec = $("fhSec"), body = $("fhBody");
     if (!fh.length){ sec.style.display="none"; return; }
     sec.style.display = "block";
@@ -974,6 +993,7 @@
   function getHistory(){
     var h = window.__HISTORY__;
     if (!Array.isArray(h)) return [];
+    aliasLiveData();
     return h.slice(-10);
   }
   function renderTrend(){
@@ -1264,9 +1284,9 @@
   //   口径: 目标在加班起点(白班17:20/夜班5:50)正好推到 1500, 之后按 pace 继续累加。
   //   注: 手机端 normName 只去空格(同电脑端早上线前的定义), "Motor H-Series"→"motorhseries"命中。
   // ★ 2026-10-14 手动目标重构: PRO1 五线按「班次」手动目标, 口径=正常工作时段 8H(同步电脑端)
-  //   FL(Motor AC) 白班1600/无夜班 · WL 1600/1600 · H 1800/1800 · F 1600/400 · S 1600/400
+  //   FL(Motor FL, 原名 Motor AC) 白班1600/无夜班 · WL 1600/1600 · H 1800/1800 · F 1600/400 · S 1600/400
   var PRO1_MANUAL = {
-    "motorac":       { day: 1600, night: 0    },
+    "motorfl":       { day: 1600, night: 0    },
     "motorwl":       { day: 1600, night: 1600 },
     "motorhseries":  { day: 1800, night: 1800 },
     "motorh-series": { day: 1800, night: 1800 },
@@ -1786,10 +1806,11 @@
   function loadMain(){
     fetchJSON(DATA_URL).then(function(d){
       if (d && d.lines){
-        state.lines = d.lines;
+        aliasLiveData();   // ★ 2026-10-16: 历史/首小时键名统一(Motor AC → Motor FL)
+        state.lines = d.lines.map(function(l){ l.name = aliasName(l.name); return l; });
         // ★ 2026-09-09 手动目标覆盖（同步电脑端）：仅 H-Series 锁定 target=1800、plan=手工曲线、eff/cb 重算
         (state.lines||[]).forEach(function(l){ applyManualHLine(l); });
-        state.hourly = d.hourly || {};
+        state.hourly = aliasMapKeys(d.hourly || {});
         state.updatedAt = d.updatedAt || null;
         state.source = d.source || "";
         state.mode = d.mode || "";
@@ -1980,7 +2001,7 @@
 
   /* 车间分组 (与主看板 WS_GROUPS 一致) */
   var WS_GROUPS = [
-    { ws: "PRO1",  label: "PRO1",            lines: ["Motor AC","Motor CL","Motor WL","Motor F-Series","Motor H-Series","Motor S-Series"] },
+    { ws: "PRO1",  label: "PRO1",            lines: ["Motor FL","Motor CL","Motor WL","Motor F-Series","Motor H-Series","Motor S-Series"] },
     { ws: "PRO2R", label: "PRO2·Rot/Fin",    lines: ["Final A line","Final B Line","Final C line","Final D line","Rotor A line","Rotor B Line","Rotor C line","Rotor D Line"] },
     { ws: "PRO2S", label: "PRO2·Ship",       lines: ["Inspection A","Inspection B","Inspection C","Inspection D"] },
     { ws: "PRO3",  label: "PRO3",            lines: ["Welding A line","Welding B line","Welding C line","Welding D line"] },
