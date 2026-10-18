@@ -1580,7 +1580,10 @@
       // ★ 2026-09-14 数据端已给 hourly 桶加班里日 d(8:00分界; 凌晨00:00-08:00桶归前一班里日)。
       //   优先按 d 精确匹配当前班里日取桶; 无 d 的桶(未回填/历史)回退 isDayQry 分钟范围兜底。
       var _b0=bkkDay0()-(nowMi<8*60?86400000:0), _bp=bkkParts(_b0), _curDaily=_bp.y+"-"+("0"+_bp.M).slice(-2)+"-"+("0"+_bp.D).slice(-2);
-      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; var m2=snapMins(sn); if (post && m2<NIGHT_END) m2+=1440; var _d=sn.d; if(_d!==undefined && _d!==null && String(_d)!==""){ if(String(_d)!==_curDaily) continue; } else if (isDayQry && !(m2>=8*60 && m2<=DAY_END)) continue; pts.push({ m:m2, v:usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0) }); }
+      // ★ 2026-10-18: 开班桶(8:00/20:30)按定义累计=0。停产日无人换班清零 → 首条记录仍是上一班终值,
+      //   不归零的话小时图第一段会把上一班整整一班产量画成巨柱。
+      var _nMi2=bkkMin(); var _shiftStart2=((_nMi2<NIGHT_END?_nMi2+1440:_nMi2)>=NIGHT_START)?NIGHT_START:480;
+      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; var m2=snapMins(sn); if (post && m2<NIGHT_END) m2+=1440; var _d=sn.d; if(_d!==undefined && _d!==null && String(_d)!==""){ if(String(_d)!==_curDaily) continue; } else if (isDayQry && !(m2>=8*60 && m2<=DAY_END)) continue; var _v2=usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0); if (m2===_shiftStart2) _v2=0; pts.push({ m:m2, v:_v2 }); }
       pts.sort(function(a,b){ return a.m-b.m; });
       var tAbs = t; // 查询边界直接用班次日分钟 (day 同制)
       var lo=null, hi=null, hiN=null;
