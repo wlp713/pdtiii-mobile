@@ -1461,6 +1461,57 @@
   function fmtSegMin(m){ var x=((m%1440)+1440)%1440; return ("0"+Math.floor(x/60)).slice(-2)+":"+("0"+(x%60)).slice(-2); }
   // 快照桶 h 解析: 后端 sync_db 存 HHMM 转 int (前导零丢失: 00:10→10, 08:10→810)
   //   h>=100 → HHMM (前2-3位=时, 后2位=分); h<100 只可能是 00:xx 凌晨桶 → 分钟即自身
+  // ═══ 2026-10-18 修复: 数据端每个班里日首条记录(08:00/20:30)是换班清零前落库的,
+  //   带的是上一班累计(正常生产日会被紧随清零覆盖, 归档里 800 桶=0)。停产日无人换班清零,
+  //   lines 快照停在上一班终值 → 被当成今天产出。用 hourly 桶判本班次有无真实增长。
+  function bkkDateStrM(ts){ var p=bkkParts(ts); return p.y+"-"+("0"+p.M).slice(-2)+"-"+("0"+p.D).slice(-2); }
+  function mobileShiftNow(){
+    var mi=bkkMin(), tail=mi<NIGHT_END, nowM=tail?mi+1440:mi;
+    return { tail:tail, nowM:nowM, start: nowM>=NIGHT_START?NIGHT_START:480,
+             daily: bkkDateStrM(bkkDay0()-(tail?86400000:0)) };
+  }
+  function mobileShiftPts(name, sc){
+    var arr=(state.hourly||{})[hourlyKeyOf(name)];
+    if (!arr || !arr.length) return null;
+    var pts=[];
+    for (var i=0;i<arr.length;i++){
+      var sn=arr[i], raw=snapMins(sn), m=(sc.tail && raw<NIGHT_END)?raw+1440:raw;
+      var hasD=(sn.d!==undefined && sn.d!==null && String(sn.d)!=="");
+      if (hasD){ if (String(sn.d)!==sc.daily) continue; } else if (m<sc.start) continue;
+      pts.push({ m:m, v:Number(sn.actual)||0 });
+    }
+    if (!pts.length) return null;
+    pts.sort(function(a,b){ return a.m-b.m; });
+    return pts;
+  }
+  function guardCarryOverLines(){
+    var sc=mobileShiftNow();
+    if (sc.nowM < sc.start+20) return;
+    var noShiftData = sc.nowM >= sc.start+70;
+    (state.lines||[]).forEach(function(l){
+      var pts=mobileShiftPts(l.name, sc), act=Number(l.actual)||0, carry=false;
+      if (pts){
+        var startV=null, afterMax=-Infinity;
+        for (var i=0;i<pts.length;i++){
+          if (Math.abs(pts[i].m-sc.start)<=10) startV=pts[i].v;
+          if (pts[i].m>sc.start && pts[i].v>afterMax) afterMax=pts[i].v;
+        }
+        if (startV!==null) afterMax=Math.max(afterMax, startV);
+        if (startV!==null && startV>0 && act<=startV+0.5 && afterMax<=startV+0.5) carry=true;
+        else if (startV===null && noShiftData){ var last=pts[pts.length-1]; if (last.m<sc.start && act<=last.v+0.5) carry=true; }
+      } else if (noShiftData && (l.stalled===true || String(l.status||"").toUpperCase()==="STALLED")){
+        carry=true;
+      }
+      if (!carry) return;
+      var plan=Number(l.plan)||0;
+      l.carryOver=true; l.actual=0; l.cum=0; l.cb=-plan; l.eff=null; l.status="STOP"; l.stalled=false;
+    });
+    // 全厂本班次零产出 → 统一显示停止, 不要满屏停滞
+    var live=(state.lines||[]);
+    if (live.length && live.every(function(l){ return (Number(l.actual)||0)<=0; })){
+      live.forEach(function(l){ if (String(l.status||"").toUpperCase()==="RUN") return; l.status="STOP"; l.stalled=false; });
+    }
+  }
   function snapMins(sn){
     var raw = String(sn.h || "").trim();
     if (!raw) return 0;
@@ -1811,6 +1862,8 @@
         // ★ 2026-09-09 手动目标覆盖（同步电脑端）：仅 H-Series 锁定 target=1800、plan=手工曲线、eff/cb 重算
         (state.lines||[]).forEach(function(l){ applyManualHLine(l); });
         state.hourly = aliasMapKeys(d.hourly || {});
+        // ★ 2026-10-18 (同电脑端): 停产日「上一班累计冒充当日产出」守卫
+        try { guardCarryOverLines(); } catch(e){}
         state.updatedAt = d.updatedAt || null;
         state.source = d.source || "";
         state.mode = d.mode || "";
