@@ -1319,12 +1319,17 @@
       if (pts){
         var startV=null, afterMax=-Infinity;
         for (var i=0;i<pts.length;i++){
-          if (Math.abs(pts[i].m-sc.start)<=10) startV=pts[i].v;
+          // ★ 2026-10-26 修复: 旧判定 |m-sc.start|<=10 会把白班末桶 20:20(=1220分) 当夜班起点桶(20:30=1230分)
+          //   → startV=白班累计 → 本班实际被误判「上一班残留」→ 产出归 0、达成率留空。
+          if (pts[i].m>=sc.start && pts[i].m<=sc.start+10) startV=pts[i].v;
           if (pts[i].m>sc.start && pts[i].v>afterMax) afterMax=pts[i].v;
         }
         if (startV!==null) afterMax=Math.max(afterMax, startV);
         if (startV!==null && startV>0 && act<=startV+0.5 && afterMax<=startV+0.5) carry=true;
-        else if (startV===null && noShiftData){ var last=pts[pts.length-1]; if (last.m<sc.start && act<=last.v+0.5) carry=true; }
+        else if (startV===null && noShiftData && (l.stalled===true || String(l.status||"").toUpperCase()==="STALLED")){
+          // ★ 2026-10-26 修复: 加「数据端已判停滞」门槛 — 旧逻辑只要求本班无桶就判残留,
+          //   数据端夜班桶缺失时会把在产线整批误清零。
+          var last=pts[pts.length-1]; if (last.m<sc.start && act<=last.v+0.5) carry=true; }
       } else if (noShiftData && (l.stalled===true || String(l.status||"").toUpperCase()==="STALLED")){
         carry=true;
       }
