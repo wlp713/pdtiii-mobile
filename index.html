@@ -409,7 +409,6 @@
 <header>
   <div class="h-top">
     <div class="h-title" id="title"><span class="h-ico"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#5aa9ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l3-5h8l3 5v13"/><path d="M9 10h2v4H9z"/><path d="M13 10h2v5h-2z"/><path d="M9 18h2v3H9z"/><path d="M13 18h2v3h-2z"/></svg></span> <span style="font-size:17px">Production Board</span> <small id="modeTag">LIVE</small></div>
-    <button class="lang-btn" id="aiBtn" aria-label="Open AI assistant" title="AI 助手" style="display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:0 8px;height:26px;min-width:30px;font-size:11px;background:rgba(255,255,255,.07);color:rgba(224,232,240,.82);border:1px solid rgba(255,255,255,.16);border-radius:7px;opacity:.85;box-shadow:none"><svg viewBox="0 0 24 24" aria-hidden="true" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="8" cy="16" r="1"/><circle cx="16" cy="16" r="1"/><path d="M12 3v4M8 7h8"/></svg><span>AI</span></button>
     <button class="lang-btn" id="langBtn">TH</button>
   </div>
   <div class="h-sub">
@@ -592,7 +591,8 @@
     { ws: "PRO5",   label: "PRO5",            lines: ["Frame Honing FL", "Piston honing FL", "Cylinder Honing"] }
   ];
   var WS_LABEL = {}; WS_GROUPS.forEach(function(g){ WS_LABEL[g.ws] = g.label; });
-  WS_LABEL.ALL = "全部";   // ★ 2026-10-29 伪车间: 全部线体
+  WS_LABEL.ALL = "全部";      // ★ 2026-10-29 伪车间: 全部线体
+  WS_LABEL.OTHER = "其他";    // ★ 2026-10-29 未映射线体兜底分组
   var LINE2WS = {};
   WS_GROUPS.forEach(function(g){ g.lines.forEach(function(ln){ LINE2WS[normName(ln)] = g.ws; }); });
   var wsSel = null;   // null = 主要线体视图 (默认, 与原版一致); 选中后=该车间全部线体
@@ -767,7 +767,7 @@
     all.textContent = T("主要","Main");
     all.addEventListener("click", function(){ setWs(null); });
     box.appendChild(all);
-    // ★ 2026-10-29 第二个 chip = 全部线体, 保证列表能看到小时图里的每一条线
+    // ★ 2026-10-29 全部线体 chip — 保证列表能看到小时图里的每一条线
     var allLine = document.createElement("div");
     allLine.className = "chip";
     allLine.dataset.ws = "ALL";
@@ -782,6 +782,13 @@
       c.addEventListener("click", function(){ if (c.classList.contains("dim")) return; setWs(wsSel === g.ws ? null : g.ws); });
       box.appendChild(c);
     });
+    // ★ 2026-10-29 兜底 chip: 任何未配车间映射的线体自动落这里 (计数 0 时自动置灰)
+    var oth = document.createElement("div");
+    oth.className = "chip";
+    oth.dataset.ws = "OTHER";
+    oth.innerHTML = T("其他","Other") + ' <span class="cnt"></span>';
+    oth.addEventListener("click", function(){ if (oth.classList.contains("dim")) return; setWs(wsSel === "OTHER" ? null : "OTHER"); });
+    box.appendChild(oth);
     updWsChips();
   }
   function updWsChips(){
@@ -789,7 +796,7 @@
     if (!box) return;
     var alive = {};
     (state.lines||[]).forEach(function(l){
-      var ws = wsGroupOf(l) || "OTHER";
+      var ws = wsGroupOf(l) || "OTHER";     // ★ 2026-10-29 未映射线体计入「其他」, 不再静默隐藏
       alive[ws] = (alive[ws]||0) + 1;
     });
     alive.ALL = (state.lines||[]).length;
@@ -1017,7 +1024,7 @@
     var hKeys = {};
     hist.forEach(function(d){ Object.keys(d.lines||{}).forEach(function(k){ hKeys[normName(k)] = k; }); });
     if (wsSel && wsSel !== "ALL" && wsSel !== "OTHER"){
-      // ★ 2026-10-29 车间模式: 该车间全部有历史数据的线体 → 每线一趋势卡, 卡片大小按线体数自适应
+      // ★ 2026-09-05 车间模式: 该车间全部有历史数据的线体 → 每线一趋势卡, 卡片大小按线体数自适应
       chipsBox.innerHTML = "";
       var wsLines = wsLinesOf(wsSel);
       var cards = [], picked = [];
@@ -1332,12 +1339,22 @@
       if (pts){
         var startV=null, afterMax=-Infinity;
         for (var i=0;i<pts.length;i++){
-          if (Math.abs(pts[i].m-sc.start)<=10) startV=pts[i].v;
+          // ★ 2026-10-26 修复: 旧判定 |m-sc.start|<=10 会把白班末桶 20:20(=1220分) 当夜班起点桶(20:30=1230分)
+          //   → startV=白班累计 → 本班实际被误判「上一班残留」→ 产出归 0、达成率留空。
+          if (pts[i].m>=sc.start && pts[i].m<=sc.start+10) startV=pts[i].v;
           if (pts[i].m>sc.start && pts[i].v>afterMax) afterMax=pts[i].v;
         }
         if (startV!==null) afterMax=Math.max(afterMax, startV);
-        if (startV!==null && startV>0 && act<=startV+0.5 && afterMax<=startV+0.5) carry=true;
-        else if (startV===null && noShiftData){ var last=pts[pts.length-1]; if (last.m<sc.start && act<=last.v+0.5) carry=true; }
+        // ★ 2026-10-29 修「在产线被误清零」: 数据端有时不在换班时清零, 本班起点桶沿用上一班末桶值
+        //   (实测 Inspection C: 800桶=上一班750桶终值; Welding C 同理) → startV=上一班累计 → 本班实际
+        //   被误判「上一班残留」清零。判据: 起点之后有桶掉到 startV 以下 = 确实重新累计(线在产) → 不判残留。
+        var resetSeen=false;
+        if (startV!==null){ for (var ri=0;ri<pts.length;ri++){ if (pts[ri].m>sc.start && pts[ri].v<startV-0.5){ resetSeen=true; break; } } }
+        if (startV!==null && startV>0 && !resetSeen && act<=startV+0.5 && afterMax<=startV+0.5) carry=true;
+        else if (startV===null && noShiftData && (l.stalled===true || String(l.status||"").toUpperCase()==="STALLED")){
+          // ★ 2026-10-26 修复: 加「数据端已判停滞」门槛 — 旧逻辑只要求本班无桶就判残留,
+          //   数据端夜班桶缺失时会把在产线整批误清零。
+          var last=pts[pts.length-1]; if (last.m<sc.start && act<=last.v+0.5) carry=true; }
       } else if (noShiftData && (l.stalled===true || String(l.status||"").toUpperCase()==="STALLED")){
         carry=true;
       }
@@ -1872,722 +1889,6 @@
   document.addEventListener("visibilitychange", function(){
     if (!document.hidden) refreshAll();
   });
-})();
-</script>
-
-<!-- ★ 2026-09-11 AI 助手 (手机版) · 复用电脑端 ai-widget 逻辑 + 移动端 FAB 入口 -->
-<script>
-(function () {
-  "use strict";
-  if (document.getElementById("mAIWidgetPanel")) return;
-
-  var CFG = {
-    proxyUrl: (function () {
-      try { return window.AICONFIG && window.AICONFIG.proxyUrl
-        ? window.AICONFIG.proxyUrl
-        : "https://midea-ai-proxy.wigifobi28.workers.dev/ai"; }
-      catch(e){ return "https://midea-ai-proxy.wigifobi28.workers.dev/ai"; }
-    })()
-  };
-
-  /* 车间分组 (与主看板 WS_GROUPS 一致) */
-  var WS_GROUPS = [
-    { ws: "PRO1",  label: "PRO1",            lines: ["Motor FL","Motor CL","Motor WL","Motor F-Series","Motor H-Series","Motor S-Series"] },
-    { ws: "PRO2R", label: "PRO2·Rot/Fin",    lines: ["Final A line","Final B Line","Final C line","Final D line","Rotor A line","Rotor B Line","Rotor C line","Rotor D Line"] },
-    { ws: "PRO2S", label: "PRO2·Ship",       lines: ["Inspection A","Inspection B","Inspection C","Inspection D"] },
-    { ws: "PRO3",  label: "PRO3",            lines: ["Welding A line","Welding B line","Welding C line","Welding D line"] },
-    { ws: "PRO4H", label: "PRO4·Hon/Pist",   lines: ["Frame No.1","Frame No.2","Frame No.3","Frame No.4","Frame No.5","Piston Grinding","Rod Pispin","Press C-Shaft"] },
-    { ws: "PRO4B", label: "PRO4·Body/Pin",   lines: ["C-Shaft Body A","C-Shaft Body B","C-Shaft Body C","C-Shaft Pin A","C-Shft Pin B","C-Shaft Pin C"] },
-    { ws: "PRO5",  label: "PRO5",            lines: ["Frame Honing FL","Piston honing FL","Cylinder Honing"] },
-    { ws: "AUX",   label: "辅助/其他",     lines: ["Water Line","True B"] }
-  ];
-  function wsLabelOf(n){ n=String(n||"").toLowerCase().replace(/\s+/g,""); for(var i=0;i<WS_GROUPS.length;i++){ for(var j=0;j<WS_GROUPS[i].lines.length;j++){ if(String(WS_GROUPS[i].lines[j]).toLowerCase().replace(/\s+/g,"")===n) return WS_GROUPS[i].label; } } return "其他"; }
-
-  function getStateRef(){ try { if (window.state) return window.state; } catch(e){} return null; }
-
-  /* 查询解析只针对已加载的静态归档，不改页面日期，也不访问 Firebase。 */
-  function metricText(v){ return (v===null || v===undefined || v==="") ? "缺失" : String(v); }
-  function normQueryText(v){ return String(v||"").toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, ""); }
-  function shiftText(key){ return key==="day" ? "白班" : (key==="night" ? "夜班" : "全天"); }
-  function shiftKeysForQuery(q){
-    var s=String(q||"");
-    var hasDay=/(白班|白班段|day\s*shift|\bday\b)/i.test(s);
-    var hasNight=/(夜班|晚班|夜班段|night\s*shift|\bnight\b)/i.test(s);
-    var all=/(全天|完整工作日|全日|全天汇总|full\s*day|whole\s*day|daily)/i.test(s);
-    if(all || (hasDay && hasNight)) return ["day","night"];
-    if(hasDay) return ["day"];
-    if(hasNight) return ["night"];
-    return ["day","night"];
-  }
-  function localDateString(dt){
-    var y=dt.getFullYear(), m=("0"+(dt.getMonth()+1)).slice(-2), d=("0"+dt.getDate()).slice(-2);
-    return y+"-"+m+"-"+d;
-  }
-  function queryDates(q, days){
-    var s=String(q||""), result=[], seen={};
-    function add(v){ if(v && !seen[v]){ seen[v]=true; result.push(v); } }
-    var iso=/20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}/g, m;
-    while((m=iso.exec(s))){
-      add(m[0].replace(/[/.]/g,"-").split("-").map(function(x,i){return i===0?x:("0"+x).slice(-2);}).join("-"));
-    }
-    var md=/((?:\d{1,2})月(?:\d{1,2})日|\b\d{1,2}[\/-]\d{1,2}\b)/g;
-    while((m=md.exec(s))){
-      var nums=m[0].match(/\d+/g)||[]; if(nums.length<2) continue;
-      var mm=("0"+Number(nums[0])).slice(-2), dd=("0"+Number(nums[1])).slice(-2), found=null;
-      (days||[]).some(function(d){ if(String(d.date||"").slice(5)===(mm+"-"+dd)){ found=d.date; return true; } return false; });
-      add(found || (new Date().getFullYear()+"-"+mm+"-"+dd));
-    }
-    if(/(今天|today)/i.test(s)) add(localDateString(new Date()));
-    if(/(昨天|昨日|yesterday)/i.test(s)){ var y=new Date(); y.setDate(y.getDate()-1); add(localDateString(y)); }
-    return result;
-  }
-  function workshopMentioned(q, ws){
-    var n=normQueryText(q), w=normQueryText(ws), short=w.replace(/^pro/,"");
-    return (w && n.indexOf(w)>-1) || (short && n.indexOf("pro"+short)>-1);
-  }
-  function lineMentioned(q, name){
-    var n=normQueryText(q), line=normQueryText(name), base=line.replace(/line$/i,"");
-    return (line.length>=5 && n.indexOf(line)>-1) || (base.length>=5 && n.indexOf(base)>-1);
-  }
-  function selectedLineNames(q, days){
-    var result=[], seen={};
-    (days||[]).forEach(function(d){
-      Object.keys(d.lines||{}).forEach(function(name){
-        var row=d.lines[name]||{};
-        if(!row.finishedProduct || seen[name]) return;
-        if(lineMentioned(q,name) || workshopMentioned(q,row.workshop)){ seen[name]=true; result.push(name); }
-      });
-    });
-    return result;
-  }
-  function shiftMetrics(s){
-    s=s||{};
-    return "正常"+metricText(s.normal)+" | 加班"+metricText(s.overtime)+" | 合计"+metricText(s.total)+" | 计划"+metricText(s.plan)+" | 达成率"+(s.attainment==null?"缺失":s.attainment+"%");
-  }
-  function appendTargetedArchive(out, query, days){
-    var dates=queryDates(query,days), shifts=shiftKeysForQuery(query), lineNames=selectedLineNames(query,days);
-    if(!dates.length && !lineNames.length) return;
-    if(!dates.length && days.length) dates=[days[days.length-1].date];
-    out.push("\n【精确查询结果 · 成品线归档 · 不受页面日期选择限制】");
-    dates.forEach(function(date){
-      var d=null; (days||[]).some(function(item){ if(String(item.date)===String(date)){d=item;return true;} return false; });
-      if(!d){ out.push("  "+date+" | 归档中没有这一天的可用记录（未知，不按0计算）"); return; }
-      var names=lineNames.length ? lineNames.slice() : Object.keys(d.lines||{}).filter(function(name){ return d.lines[name] && d.lines[name].finishedProduct; });
-      out.push("  日期 "+d.date+" | 质量 白班="+((d.quality&&d.quality.dayStatus)||"未知")+" 夜班="+((d.quality&&d.quality.nightStatus)||"未知"));
-      shifts.forEach(function(shift){
-        if(!names.length){ out.push("  "+d.date+" | "+shiftText(shift)+" | 没有可用成品线明细"); return; }
-        names.forEach(function(name){
-          var row=d.lines[name]||{};
-          out.push("  "+d.date+" | "+shiftText(shift)+" | ["+(row.workshop||"未标注")+"] "+name+" | "+shiftMetrics(row[shift]||{}));
-        });
-      });
-    });
-  }
-
-  /* ── 上下文采集: 实时 + 成品归档 + 查询命中的日期/班次/线体明细 ── */
-  function collectContext(query) {
-    var out = [], q=String(query||"");
-    out.push("当前本地时间: " + new Date().toLocaleString("zh-CN", { hour12:false }));
-    var st = getStateRef();
-
-    if (st && st.lines && st.lines.length) {
-      var lines = st.lines.slice().sort(function(a,b){ return (b.cb!==undefined?b.cb:0)-(a.cb!==undefined?a.cb:0); });
-      out.push("\n【当天产出汇总 · 更新时间 " + (st.updatedAt||"-") + "】");
-      lines.forEach(function(l){
-        var nm=l.name, ws=wsLabelOf(nm);
-        var eff=(l.eff!==undefined?l.eff:0); if (typeof eff==="number") eff=eff.toFixed(1);
-        var cb=(l.cb!==undefined?l.cb:(l.plan!==undefined?(l.actual||0)-l.plan:0));
-        out.push("  "+(ws?"["+ws+"]":"[无车间]")+" "+nm+" 目标"+(l.target||"-")+" 计划"+(l.plan||"-")+" 实际"+(l.actual||"-")+" 达成率"+eff+"% 欠产"+(cb>0?"+":"")+cb+(l.status?" "+l.status:""));
-      });
-    } else {
-      out.push("\n(实时数据尚未加载完成)");
-    }
-
-    /* 历史达成率 */
-    var H = window.__HISTORY__;
-    if (H && H.length) {
-      out.push("\n【历史达成率 · 最近" + Math.min(H.length,14) + "天】");
-      H.slice(-14).forEach(function(d){
-        var ls=d.lines||{}; var names=Object.keys(ls);
-        var parts=names.map(function(k){return k+":"+(typeof ls[k]==="number"?ls[k].toFixed(1):ls[k])+"%";});
-        if (parts.length>16){ parts=parts.slice(0,16).concat(["…("+(parts.length-16)+"条线)"]); }
-        out.push("  "+d.date+" — "+parts.join(" , "));
-      });
-    }
-
-    /* 问题点 */
-    var D = window.__LIVE_DATA__;
-    if (D && D.problems && D.problems.length) {
-      out.push("\n【问题点 " + D.problems.length + " 条】");
-      D.problems.slice(0,8).forEach(function(p){
-        out.push("  ["+(p.ws||"")+" "+(p.series||"")+" "+(p.time||"")+"] 计划"+(p.plan||"-")+"/实际"+(p.actual||"-")+"/缺口"+(p.impact||"-")+" — "+(p.problem_zh||p.problem_th||""));
-      });
-    }
-
-    /* 每日制程问题点日志(历史导入) — 与电脑端同源 (pdtiii-live 的 daily-problems-data.js + Firebase) */
-    var DP = (typeof window.__DAILY_PROBLEMS__ !== "undefined") ? window.__DAILY_PROBLEMS__ : null;
-    if (DP && DP.byDate) {
-      var dpDates = Object.keys(DP.byDate).sort();
-      var dpRows = [];
-      dpDates.forEach(function(dd){ dpRows = dpRows.concat(DP.byDate[dd] || []); });
-      var qRaw = String(q || "").toLowerCase();
-      var dpSelDates = queryDates(q, dpDates.map(function(dd){ return { date: dd }; }));
-      var dpShiftKeys = shiftKeysForQuery(q);
-      var dpShift = (dpShiftKeys.length === 1) ? dpShiftKeys[0] : "full";
-      var dpDeptTok = null;
-      var mDept = qRaw.match(/pro\s*\.?\s*([1-4])/);
-      if (mDept) dpDeptTok = "pro." + mDept[1];
-      else if (/(^|[^a-z])pe([^a-z]|$)/.test(qRaw)) dpDeptTok = "pe";
-      else if (/(^|[^a-z])ip([^a-z]|$)/.test(qRaw)) dpDeptTok = "ip";
-      else if (/(^|[^a-z])qa([^a-z]|$)/.test(qRaw)) dpDeptTok = "qa";
-      else if (/changemodel|modelchang|换型|换模/.test(qRaw)) dpDeptTok = "changemodel";
-      var dpLine = null;
-      var mLine = qRaw.match(/([a-d])\s*线/) || qRaw.match(/final\s*([a-d])\b/) || qRaw.match(/([a-d])\s*line\s/) || qRaw.match(/\bline\s*([a-d])\b/) || qRaw.match(/([a-d])\s*(สาย|ไลน)/);
-      if (mLine) dpLine = mLine[1].toLowerCase();
-      if (dpLine) {
-        out.unshift("⚠️ 最高优先级指令（线体问题）: 本次用户只问 PRO.2 装配车间的 final " + dpLine.toUpperCase() + " 线。本段上下文里实时产出、成品归档、车间明细中出现的一切其他车间同名线（如 C-Shaft Body B、C-Shft Pin B、Welding B 等）都与本问题无关，判定线体问题时一律忽略它们、禁止引用其数据。线体问题只能依据下方【每日制程问题点日志 H 节】中班次首字母=" + dpLine.toUpperCase() + " 的条目作答(dept 为 PRO.2 或未标注都算, 因为问题点只在 PRO.2 装配记录)，按影响数(impact)取最大。若该节显示 0 条命中, 必须先看该节日期的「按日×部门汇总」是否有「-」(未标注部门)行, 不要再断言无数据。");
-      }
-      var dpFiltered = dpRows.filter(function(p){
-        if (dpSelDates.length && dpSelDates.indexOf(String(p.date)) < 0) return false;
-        if (dpShift && dpShift !== "full") { var isN = /NIGHT/i.test(p.shift || ""); if ((dpShift === "night") !== isN) return false; }
-        if (dpLine) {
-          var dv = (p.dept || "").toLowerCase();
-          if (dv && dv !== "pro.2") return false;
-          if ((p.shift || "").toLowerCase().charAt(0) !== dpLine) return false;
-        } else if (dpDeptTok && p.dept) { if ((p.dept || "").toLowerCase() !== dpDeptTok) return false; }
-        return true;
-      });
-      var dpScope = dpLine ? ("线体=" + dpLine.toUpperCase() + "线(PRO.2装配 final " + dpLine.toUpperCase() + "线)")
-        : (dpDeptTok ? ("部门=" + dpDeptTok.toUpperCase())
-        : (dpShift !== "full" ? ("班次=" + (dpShift === "day" ? "白班" : "夜班")) : ""));
-      if (dpSelDates.length) dpScope = "日期=" + dpSelDates.join(",") + (dpScope ? " " + dpScope : "");
-      out.push("\n【每日制程问题点日志 · 历史导入 · 共" + dpDates.length + "天/" + dpRows.length + "条, 本问句命中 " + dpFiltered.length + " 条" + (dpScope ? " (" + dpScope + ")" : "") + "】");
-      out.push("字段: 日期 | 班次(shift, 首字母A/B/C/D=PRO.2装配 final A-D 线)·责任部门(dept) | 影响数(impact, 产出缺口) | 泰语原文描述");
-      out.push("注: dept 为「-」表示该条未标注责任部门; 线体问题按班次首字母匹配, 与 dept 是否标注无关。");
-      var dpSum = {}, dpOrder = [];
-      dpFiltered.forEach(function(p){
-        var k = p.date + "|" + (p.dept || "-");
-        if (!dpSum[k]) { dpSum[k] = { date: p.date, dept: p.dept || "-", n: 0, imp: 0 }; dpOrder.push(k); }
-        dpSum[k].n += 1; dpSum[k].imp += (Number(p.impact) || 0);
-      });
-      dpOrder.sort();
-      if (dpOrder.length) {
-        out.push("按日×部门汇总(条数/影响合计):");
-        dpOrder.slice(0, 40).forEach(function(k){ var s2 = dpSum[k]; out.push("  " + s2.date + " " + s2.dept + " → " + s2.n + "条/" + s2.imp); });
-        if (dpOrder.length > 40) out.push("  …(" + (dpOrder.length - 40) + "个组合省略)");
-      }
-      if (dpFiltered.length) {
-        var dpShown = dpFiltered.length > 500 ? dpFiltered.slice(dpFiltered.length - 500) : dpFiltered;
-        out.push("明细" + (dpShown.length < dpFiltered.length ? "(最近500条, 共" + dpFiltered.length + ")" : ":"));
-        dpShown.forEach(function(p){
-          out.push("  [" + p.date + " " + (String(p.shift || "").replace("-", " ").toUpperCase() || String(p.shiftLabel || "")) + "] " + (p.dept || "-") + " 影响" + (p.impact == null ? "-" : p.impact) + " — " + (p.problem_th || ""));
-        });
-      } else {
-        out.push("本次条件无命中条目(可用日期: " + dpDates.join(", ") + ")。");
-      }
-      out.push("口径: 泰语为原始描述; 责任部门=dept(PE/IP/QA/PRO.1-4/CHANGEMODEL换型); 影响数=该问题造成的产出缺口。用户问'A/B/C/D线'时一律指PRO.2装配车间的final A-D四条线(条目的班次首字母=线体)。回答语言跟随提问语言——泰语提问用泰语原文总结, 中文提问把泰语翻译成中文再分析。");
-    }
-
-    /* 成品归档总览 + 按问题精确下钻到日期/班次/线体。 */
-    var AD = (typeof window.__ANA_DAYS__ !== "undefined") ? window.__ANA_DAYS__ : null;
-    if (AD && AD.length) {
-      out.push("\n【成品归档总览 · 每日白班/夜班独立 · 共" + AD.length + "天】(正常、加班、合计、计划、达成率均按生产日期归档)");
-      AD.slice(-7).forEach(function(d){
-        var dt=d.day, nt=d.night;
-        out.push("  "+d.date+" | 白班: "+shiftMetrics(dt)+" | 夜班: "+shiftMetrics(nt));
-        if (d.workshops && d.workshops.length) {
-          var top=d.workshops.slice(0,8).map(function(w){ return w.ws+"总"+metricText(w.total)+(w.attainment!=null?"("+w.attainment+"%)":""); }).join(" > ");
-          out.push("    成品车间排名: "+top);
-        }
-      });
-      appendTargetedArchive(out,q,AD);
-      out.push("  可查询日期: "+AD.map(function(d){return d.date;}).join(", "));
-    } else {
-      out.push("\n【成品归档】(产出分析数据尚未准备好，不能把缺失当作0)");
-    }
-
-    out.push("\n(以上精确明细来自静态 analytics.json 成品归档；AI 可直接按任意已归档日期、白班/夜班、车间或线体查询，不依赖当前页面日期)");
-    return out.join("\n");
-  }
-
-  /* ── 样式 (移动端全屏) ── */
-  var style = document.createElement("style");
-  style.textContent = "" +
-    "#mAIWidgetPanel{--ai-ink:#14233b;--ai-muted:#718096;--ai-blue:#1d5fd1;--ai-line:#dfe7f2;position:fixed;inset:0;margin:auto;z-index:999999;width:min(1040px,94vw);height:min(84vh,760px);display:none;flex-direction:column;overflow:hidden;background:rgba(247,249,252,.98);border-radius:0;box-shadow:0 24px 80px rgba(5,20,48,.4);font-family:'Segoe UI','Microsoft YaHei',sans-serif;color:var(--ai-ink)}" +
-    "#mAIWidgetPanel *{box-sizing:border-box}#mAIWidgetPanel button{font-family:inherit}" +
-    ".ai-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:linear-gradient(180deg,#0d2343,#1b4d9c);color:#fff}" +
-    ".ai-brand{display:flex;align-items:center;gap:10px;min-width:0}" +
-    ".ai-brand-copy{display:flex;flex-direction:column;min-width:0}.ai-brand-copy small{font-size:9px;letter-spacing:1.4px;font-weight:900;color:#a9c8ff}.ai-brand-copy strong{font-size:15px;line-height:1.2;white-space:nowrap}" +
-    ".ai-head-actions{display:flex;align-items:center;gap:8px}" +
-    ".ai-live-dot{display:flex;align-items:center;gap:6px;color:#d9e8ff;font-size:10px;font-weight:800}.ai-live-dot i{width:7px;height:7px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 4px rgba(74,222,128,.13)}" +
-    ".ai-head-btn{height:32px;padding:0 11px;border:1px solid rgba(255,255,255,.25);border-radius:8px;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;font-size:12px;font-weight:800}.ai-close{width:34px;padding:0;font-size:19px}" +
-    ".ai-chat{display:flex;flex-direction:column;flex:1;min-height:0;background:#fbfcfe}" +
-    ".ai-chat-intro{padding:13px 16px 9px;border-bottom:1px solid #e8edf5;background:rgba(255,255,255,.66)}.ai-chat-intro h3{margin:3px 0 2px;font-size:16px}.ai-chat-intro p{margin:0;color:var(--ai-muted);font-size:11px}" +
-    ".ai-messages{flex:1;min-height:0;overflow-y:auto;padding:13px 15px 16px;background:#fbfcfe}" +
-    ".ai-message{display:flex;gap:9px;align-items:flex-start;margin:0 0 14px}.ai-message.user{flex-direction:row-reverse}" +
-    ".ai-message-avatar{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;border-radius:8px;background:#dbe9fb;color:var(--ai-blue);font-size:10px;font-weight:900}.ai-message.user .ai-message-avatar{background:#1d5fd1;color:#fff}" +
-    ".ai-message-body{display:flex;flex-direction:column;max-width:84%;min-width:0}" +
-    ".ai-message-meta{display:block;margin:1px 0 4px;color:#8a9ab0;font-size:9px;font-weight:800}.ai-message.user .ai-message-meta{text-align:right}" +
-    ".ai-message-bubble{width:fit-content;max-width:100%;padding:11px 14px;border:1px solid #e0e7f1;border-radius:4px 14px 14px 14px;background:#fff;color:#28384e;font-size:13px;line-height:1.7;word-break:break-word;box-shadow:0 3px 10px rgba(31,58,96,.05)}" +
-    ".ai-message-bubble p{margin:0 0 9px}.ai-message-bubble p:last-child{margin-bottom:0}.ai-message-bubble ul{margin:5px 0 9px;padding-left:18px}.ai-message-bubble li{margin:3px 0}" +
-    ".ai-message-bubble .ai-answer-label{color:#1d5fd1;font-weight:900}.ai-message-bubble .ai-answer-divider{height:1px;margin:9px 0;background:#e8edf5}.ai-message-bubble .ai-answer-muted{color:#718096}" +
-    ".ai-message-bubble .ai-table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:6px 0 10px;border:1px solid #e1e8f2;border-radius:10px}" +
-    "#mAIWidgetPanel table.ai-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:auto;white-space:nowrap;background:#fff}" +
-    "#mAIWidgetPanel table.ai-table th{background:#eef3fa;color:#1d5fd1;font-weight:800;text-align:left;padding:7px 9px;border-bottom:1px solid #d7e2ef;font-size:11px}" +
-    "#mAIWidgetPanel table.ai-table td{padding:7px 9px;border-bottom:1px solid #eef2f7;color:#2b3e5a}" +
-    "#mAIWidgetPanel table.ai-table tr:last-child td{border-bottom:none}" +
-    "#mAIWidgetPanel table.ai-table tbody tr:nth-child(even){background:#f8fafd}" +
-    /* ── 历史对话抽屉 ── */
-    ".ai-hist-drawer{position:absolute;top:0;left:0;bottom:0;width:100%;max-width:300px;background:#f4f7fc;border-right:1px solid #dfe7f2;z-index:5;display:flex;flex-direction:column;transform:translateX(-100%);transition:transform .22s ease;box-shadow:0 0 30px rgba(5,20,48,.2)}" +
-    ".ai-hist-drawer.open{transform:translateX(0)}" +
-    ".ai-hist-head{display:flex;align-items:center;justify-content:space-between;padding:14px 15px;background:linear-gradient(180deg,#0d2343,#1b4d9c);color:#fff}" +
-    ".ai-hist-head strong{font-size:14px}.ai-hist-close{border:0;background:none;color:#fff;font-size:20px;cursor:pointer;padding:0 4px}" +
-    ".ai-hist-list{flex:1;min-height:0;overflow-y:auto;padding:8px}" +
-    ".ai-hist-item{display:block;width:100%;text-align:left;padding:10px 12px;margin-bottom:6px;border:1px solid #e2e9f3;border-radius:10px;background:#fff;cursor:pointer}" +
-    ".ai-hist-item .t{display:block;font-size:13px;color:#22364f;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
-    ".ai-hist-item .s{display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:#8a9ab0}" +
-    ".ai-hist-item.active{border-color:#1d5fd1;background:#eaf1fd}" +
-    ".ai-hist-empty{padding:22px;text-align:center;color:#8a9ab0;font-size:12px}" +
-    ".ai-head-hist-btn{height:32px;padding:0 10px;border:1px solid rgba(255,255,255,.25);border-radius:8px;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;font-size:12px;font-weight:800}" +
-    ".ai-message.user .ai-message-bubble{border:0;border-radius:14px 4px 14px 14px;background:#1d5fd1;color:#fff}" +
-    ".ai-composer{padding:10px 12px;border-top:1px solid var(--ai-line);background:rgba(255,255,255,.85)}" +
-    ".ai-composer-box{display:flex;align-items:flex-end;gap:8px;padding:5px;border:1px solid #cbd8e8;border-radius:13px;background:#f9fbfe}" +
-    ".ai-composer textarea{flex:1;min-height:40px;max-height:110px;resize:none;border:0;outline:0;background:transparent;padding:8px;color:var(--ai-ink);font-size:14px;line-height:1.5}.ai-composer textarea::placeholder{color:#94a3b8}" +
-    ".ai-icon-btn,.ai-send-btn{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:10px;cursor:pointer}.ai-icon-btn{border:1px solid #d2ddea;background:#fff;color:#506b8d;font-size:17px}.ai-send-btn{border:0;background:#1d5fd1;color:#fff;font-size:17px}" +
-    "@media (max-width:720px){#mAIWidgetPanel{width:100vw;height:100vh;border-radius:0}.ai-message-body{max-width:86%}.ai-compose-hint{display:none}.ai-hist-drawer{max-width:84vw}}" +
-    "html.ai-modal-open,body.ai-modal-open{overflow:hidden!important}#mAIWidgetPanel{isolation:isolate;contain:layout paint;overscroll-behavior:contain;box-shadow:0 24px 80px rgba(5,20,48,.4),0 0 0 100vmax rgba(8,20,42,.42)}#mAIWidgetPanel .ai-panel-head{position:sticky;top:0;z-index:6;flex:0 0 auto;padding-top:max(14px,env(safe-area-inset-top));isolation:isolate}#mAIWidgetPanel .ai-chat{overflow:hidden;min-height:0}#mAIWidgetPanel .ai-messages{overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}#mAIWidgetPanel .ai-composer{position:relative;z-index:4;flex:0 0 auto;padding-bottom:max(10px,env(safe-area-inset-bottom))}#mAIWidgetPanel .ai-composer-box{min-width:0;min-height:56px}#mAIWidgetPanel .ai-composer textarea{min-width:0;width:0;max-width:100%;font-family:inherit;font-size:16px;line-height:1.45}#mAIWidgetPanel .ai-icon-btn,#mAIWidgetPanel .ai-send-btn{flex:0 0 44px;width:44px;height:44px;border-radius:50%;touch-action:manipulation;user-select:none;-webkit-tap-highlight-color:transparent}#mAIWidgetPanel .ai-send-btn:disabled{background:#cbd5e1;color:#fff;cursor:not-allowed;opacity:.82;transform:none;box-shadow:none}#mAIWidgetPanel .ai-icon-btn[aria-pressed=\"true\"]{border-color:#ef9a9a;background:#fff1f2;color:#dc2626;box-shadow:0 0 0 4px rgba(239,68,68,.1)}#mAIWidgetPanel .ai-icon-btn[aria-pressed=\"true\"] svg{animation:aiMicPulse 1.35s ease-in-out infinite}@keyframes aiMicPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}#mAIWidgetPanel .ai-brand-mark{display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;border:1px solid rgba(255,255,255,.2);border-radius:11px;background:rgba(255,255,255,.1)}#mAIWidgetPanel .ai-brand-mark svg{width:20px;height:20px}#mAIWidgetPanel .ai-hist-head strong{display:flex;align-items:center;gap:7px}" +
-    "@media (max-width:720px){#mAIWidgetPanel{inset:0;width:100vw;max-width:100vw;height:var(--ai-viewport-height,100dvh);max-height:var(--ai-viewport-height,100dvh);min-height:0;border-radius:0}#mAIWidgetPanel .ai-panel-head{padding:max(12px,env(safe-area-inset-top)) 14px 14px;min-height:64px;background:linear-gradient(180deg,rgba(13,33,67,.98),rgba(27,77,156,.92) 70%,rgba(27,77,156,0) 100%)}#mAIWidgetPanel .ai-head-actions{gap:6px}#mAIWidgetPanel .ai-live-dot{display:none}#mAIWidgetPanel .ai-head-btn,#mAIWidgetPanel .ai-head-hist-btn{min-width:42px;min-height:40px;border-radius:11px}#mAIWidgetPanel .ai-chat-intro{flex:0 0 auto;padding:12px 16px 10px}#mAIWidgetPanel .ai-messages{padding:14px 12px 18px}#mAIWidgetPanel .ai-message{gap:8px;margin-bottom:14px}#mAIWidgetPanel .ai-message-avatar{flex-basis:28px;width:28px;height:28px}#mAIWidgetPanel .ai-message-body{max-width:calc(100% - 36px);flex-basis:calc(100% - 36px)}#mAIWidgetPanel .ai-message-bubble{padding:12px 13px;font-size:15px;line-height:1.62;border-radius:5px 16px 16px 16px}#mAIWidgetPanel .ai-message.user .ai-message-bubble{border-radius:16px 5px 16px 16px}#mAIWidgetPanel .ai-composer{padding:8px 10px max(10px,env(safe-area-inset-bottom));background:rgba(247,249,252,.97)}#mAIWidgetPanel .ai-composer-box{gap:7px;padding:6px;border-radius:19px;background:#fff;box-shadow:0 5px 18px rgba(31,58,96,.09)}#mAIWidgetPanel .ai-composer textarea{min-height:42px;max-height:132px;padding:8px 7px}#mAIWidgetPanel .ai-compose-hint{display:block;margin:5px 6px 0;font-size:10px;line-height:1.4;text-align:center}#mAIWidgetPanel .ai-brand-copy small{font-size:8px;letter-spacing:1.2px}#mAIWidgetPanel .ai-brand-copy strong{font-size:15px}}@media (max-width:380px){#mAIWidgetPanel .ai-brand-copy small{display:none}#mAIWidgetPanel .ai-message-bubble{font-size:14px}#mAIWidgetPanel .ai-compose-hint{font-size:9px}}";
-  document.head.appendChild(style);
-  /* 根层弹窗：与主页面建立独立层级，避免 sticky header / line detail 穿透。 */
-  style.textContent += "" +
-    "#mAIWidgetBackdrop{position:fixed;inset:0;z-index:2147483000;display:none;background:rgba(5,12,24,.62);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);pointer-events:auto}" +
-    "#mAIWidgetBackdrop.is-open{display:block}" +
-    "#mAIWidgetPanel{position:fixed;left:50%;top:50%;right:auto;bottom:auto;inset:auto;transform:translate(-50%,-50%);z-index:2147483001;width:min(1080px,calc(100vw - 32px));height:min(820px,calc(100vh - 32px));max-width:none;max-height:none;margin:0;contain:none;isolation:isolate;overflow:hidden;background:#f7f9fc;border:0;border-radius:18px;box-shadow:0 28px 80px rgba(3,14,32,.42)}" +
-    "#mAIWidgetPanel .ai-panel-head{position:relative;z-index:30;flex:0 0 auto;min-height:64px;background:linear-gradient(135deg,#0b1d38 0%,#153f83 100%)}" +
-    "#mAIWidgetPanel .ai-brand{flex:1;min-width:0}.ai-brand-copy{min-width:0}.ai-brand-copy strong{overflow:hidden;text-overflow:ellipsis}" +
-    "#mAIWidgetPanel .ai-head-actions{display:flex;flex:0 0 auto;min-width:0;gap:6px}.ai-head-btn,.ai-head-hist-btn{display:grid;place-items:center;min-width:40px;min-height:40px;padding:0}.ai-head-btn svg,.ai-head-hist-btn svg{width:17px;height:17px}" +
-    "#mAIWidgetPanel .ai-chat{position:relative;z-index:1;display:flex;flex:1;min-height:0;overflow:hidden;background:#f7f9fc}" +
-    "#mAIWidgetPanel .ai-chat-intro{flex:0 0 auto;background:#fff;border-bottom:1px solid #e5ebf3;padding:14px 16px 12px}.ai-intro-row{display:flex;align-items:center;gap:9px}.ai-intro-row h3{margin:0}.ai-scope-pill{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;background:#eaf1fd;color:#1d5fd1;font-size:10px;font-weight:800;white-space:nowrap}.ai-quick-prompts{display:flex;gap:7px;overflow-x:auto;margin-top:10px;padding-bottom:1px;scrollbar-width:none}.ai-quick-prompts::-webkit-scrollbar{display:none}.ai-quick{flex:0 0 auto;height:30px;padding:0 10px;border:1px solid #dce5f0;border-radius:999px;background:#f8fafd;color:#52708f;font-size:11px;font-weight:700;cursor:pointer}.ai-quick:active{background:#eaf1fd;border-color:#9dbce7;color:#1d5fd1}" +
-    "#mAIWidgetPanel .ai-messages{position:relative;z-index:1;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;padding:16px 16px 20px}" +
-    "#mAIWidgetPanel .ai-message{display:flex;align-items:flex-start;gap:9px;width:100%;margin:0 0 16px}.ai-message-body{display:flex;flex:0 1 auto;min-width:0;max-width:calc(100% - 35px)}.ai-message.user .ai-message-body{align-items:flex-end}.ai-message:not(.user) .ai-message-bubble{width:100%}.ai-message-bubble{display:block;width:fit-content;max-width:100%;overflow-wrap:anywhere;word-break:break-all}.ai-message-bubble .ai-table-wrap{max-width:100%}" +
-    "#mAIWidgetPanel .ai-composer{position:relative;z-index:30;flex:0 0 auto;background:#fff;border-top:1px solid #e1e8f1;padding:10px 12px max(10px,env(safe-area-inset-bottom))}" +
-    "#mAIWidgetPanel .ai-composer-box{min-width:0;background:#f8fafd}.ai-composer textarea{min-width:0;width:0;max-width:100%;font-size:16px;line-height:1.45}.ai-icon-btn,.ai-send-btn{flex:0 0 44px;width:44px;height:44px;border-radius:50%;touch-action:manipulation}" +
-    "#mAIWidgetPanel .ai-hist-drawer{position:absolute;inset:0;z-index:40;width:min(340px,88vw);max-width:none;border:0;box-shadow:12px 0 30px rgba(10,31,62,.16)}#mAIWidgetPanel .ai-hist-head{position:relative;z-index:1;padding-top:max(14px,env(safe-area-inset-top))}" +
-    "@media(max-width:720px){#mAIWidgetBackdrop{display:none!important}#mAIWidgetPanel{left:0;top:0;transform:none;width:100vw;height:var(--ai-viewport-height,100dvh);max-height:var(--ai-viewport-height,100dvh);min-height:0;border-radius:0;box-shadow:none}#mAIWidgetPanel .ai-panel-head{padding:max(12px,env(safe-area-inset-top)) 14px 12px;min-height:64px}#mAIWidgetPanel .ai-chat-intro{padding:12px 14px 10px}#mAIWidgetPanel .ai-messages{padding:14px 12px 18px}#mAIWidgetPanel .ai-composer{padding:8px 10px max(10px,env(safe-area-inset-bottom))}#mAIWidgetPanel .ai-composer-box{padding:6px;border-radius:19px;background:#fff;box-shadow:0 5px 18px rgba(31,58,96,.09)}#mAIWidgetPanel .ai-composer textarea{min-height:42px;max-height:132px;padding:8px 7px}#mAIWidgetPanel .ai-quick-prompts{margin-top:8px}.ai-compose-hint{display:block;margin:5px 6px 0;font-size:10px;line-height:1.4;text-align:center}}" +
-    "@media(max-width:380px){#mAIWidgetPanel .ai-live-dot{display:none}#mAIWidgetPanel .ai-brand-copy small{display:none}#mAIWidgetPanel .ai-message-bubble{font-size:14px}.ai-quick{padding:0 8px;font-size:10px}}";
-  style.textContent += "@media(max-width:720px){#mAIWidgetPanel{height:var(--ai-viewport-height,100lvh);max-height:var(--ai-viewport-height,100lvh)}}";
-  /* ═══ 权威移动端块(置末, 最高优先级, 压过上面所有 dvh/lvh/sticky 冲突) ═══
-     移动端面板: 左上对齐视口 + 高度=visualViewport.height(JS动态设 --ai-viewport-height)。
-     head 强制 relative 消除 sticky 浮动穿模; 面板 overflow hidden + messages 内部滚动, 杜绝内容溢出屏外 */
-  style.textContent += "@media(max-width:720px){" +
-    "#mAIWidgetPanel{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:auto!important;inset:auto!important;transform:none!important;margin:0!important;width:100vw!important;max-width:100vw!important;box-sizing:border-box;height:var(--ai-viewport-height,100dvh)!important;max-height:var(--ai-viewport-height,100dvh)!important;min-height:0;border-radius:0!important;overflow:hidden!important}" +
-    "#mAIWidgetPanel .ai-panel-head{position:relative!important;z-index:30;flex:0 0 auto;min-height:64px;padding:max(12px,env(safe-area-inset-top)) 14px 12px}" +
-    "#mAIWidgetPanel .ai-chat{position:relative!important;z-index:1;display:flex!important;flex:1!important;min-height:0;overflow:hidden!important}" +
-    "#mAIWidgetPanel .ai-messages{position:relative!important;z-index:1;flex:1!important;min-height:0;overflow-y:auto!important;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y}" +
-    "#mAIWidgetPanel .ai-composer{position:relative!important;z-index:30;flex:0 0 auto;padding:8px 10px max(10px,env(safe-area-inset-bottom));background:#fff;border-top:1px solid #e1e8f1}" +
-    "}";
-
-  /* ── DOM ── 顶栏入口 (去 FAB 悬浮按钮) */
-  var fab = document.getElementById("aiBtn");
-
-  var panel = document.createElement("div");
-  panel.id = "mAIWidgetPanel";
-  panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-modal", "true");
-  panel.setAttribute("aria-labelledby", "mAIWidgetTitle");
-  panel.innerHTML =
-     '<div class="ai-panel-head"><div class="ai-brand"><span class="ai-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M8 12h.01M16 12h.01M12 4v4M9 16h6"/></svg></span><span class="ai-brand-copy"><small>AI OPERATIONS COPILOT</small><strong id="mAIWidgetTitle">产出经营诊断</strong></span></div><div class="ai-head-actions"><span class="ai-live-dot"><i></i>已加载</span><button id="mAIHistBtn" class="ai-head-hist-btn" type="button" title="历史对话" aria-label="历史对话"><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></button><button id="mAIWidgetReset" class="ai-head-btn" type="button" title="新对话" aria-label="新对话"><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button><button id="mAIWidgetClose" class="ai-head-btn ai-close" type="button" aria-label="关闭 AI 助手" title="关闭"><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div></div>' +
-     '<div class="ai-chat"><div class="ai-chat-intro"><div class="ai-intro-row"><h3>围绕数据追问</h3><span class="ai-scope-pill">成品归档</span></div><p>可直接指定日期、白班/夜班、车间或线体；缺失数据不会按 0 计算。</p><div class="ai-quick-prompts" role="list" aria-label="快捷问题"><button type="button" class="ai-quick" data-prompt="查询昨天夜班 Final A line 的正常和加班产出">昨天 · 夜班</button><button type="button" class="ai-quick" data-prompt="查询 2026-09-05 白班和夜班 PRO2 成品线产出">按车间</button><button type="button" class="ai-quick" data-prompt="查询 2026-09-05 Final A line 白班和夜班产出">按线体</button></div></div><div id="mAIWidgetMsgs" class="ai-messages" role="log" aria-live="polite" aria-label="AI 对话记录"></div><div class="ai-composer"><div class="ai-composer-box"><textarea id="mAIWidgetInput" rows="1" aria-label="询问 AI 助手" autocomplete="off" autocapitalize="sentences" autocorrect="on" spellcheck="true" inputmode="text" enterkeyhint="send" placeholder="例如：查询 9 月 5 日夜班 Final A line 的产出"></textarea><button id="mAIWidgetMic" class="ai-icon-btn" type="button" aria-label="语音输入" aria-pressed="false" title="语音输入"><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg></button><button id="mAIWidgetSend" class="ai-send-btn" type="button" aria-label="发送问题" title="发送" disabled><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg></button></div><div class="ai-compose-hint">Enter 发送 · Shift + Enter 换行</div></div></div>' +
-    '<div class="ai-hist-drawer" id="mAIHistDrawer"><div class="ai-hist-head"><strong><svg viewBox="0 0 24 24" aria-hidden="true" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>历史对话</strong><button class="ai-hist-close" id="mAIHistClose" type="button" aria-label="关闭">×</button></div><div class="ai-hist-list" id="mAIHistList"></div></div>';
-  var backdrop = document.createElement("div");
-  backdrop.id = "mAIWidgetBackdrop";
-  backdrop.setAttribute("aria-hidden", "true");
-  document.documentElement.appendChild(backdrop);
-  document.documentElement.appendChild(panel);
-  /* 语音输入已移除，避免旧版本缓存的入口再次出现在界面。 */
-  var obsoleteMic=panel.querySelector("#mAIWidgetMic");
-  if(obsoleteMic) obsoleteMic.remove();
-  var composeHint=panel.querySelector(".ai-compose-hint");
-  if(composeHint) composeHint.remove();
-
-  function esc(t){ return String(t==null?"":t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];}); }
-  /* markdown 表格行 → HTML 表格 (仅当整个 block 都是表头+分隔+数据行) */
-  function mdTable(block){
-    try {
-      var rawL=block.replace(/\r/g,"").split("\n").map(function(l){ return l.trim(); })
-        .filter(function(l){ if(!l.trim()) return false; return /^\|.*\|$/.test(l) || /^\s*$/.test(l); });
-      if(rawL.length<3) return null;
-      // 分隔行检测 |---|---|
-      var sep = rawL.find(function(l){ return /^\|\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?$/.test(l) || /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(l); });
-      if(!sep) return null;
-      var tr2 = function(row){
-        var cells=row.replace(/^\||\|$/g,"").split("|").map(function(c){ return c.trim(); });
-        return "<tr>"+cells.map(function(c){ return "<td>"+esc(c)+"</td>"; }).join("")+"</tr>";
-      };
-      var head = rawL[0].replace(/^\||\|$/g,"").split("|").map(function(c){ return c.trim(); });
-      var body = rawL.filter(function(l, i){ return i!==0 && !/^\s*\|?\s*:?-+:?-?\s*(\|\s*:?-+:?-?\s*)*\|?\s*$/.test(l); });
-      var headHTML="<tr>"+head.map(function(h){ return "<th>"+esc(h)+"</th>"; }).join("")+"</tr>";
-      var bodyHTML=body.map(tr2).join("");
-      return '<div class="ai-table-wrap"><table class="ai-table"><thead>'+headHTML+'</thead><tbody>'+bodyHTML+'</tbody></table></div>';
-    } catch(e){ return null; }
-  }
-  function fmt(t){
-    var raw=String(t==null?"":t).replace(/\r\n?/g,"\n").trim(); if(!raw) return "<p class=\"ai-answer-muted\">无内容</p>";
-    var blocks=raw.split(/\n\s*\n/);
-    var html="";
-    for(var i=0;i<blocks.length;i++){
-      var b=blocks[i];
-      var segs=b.split("\n");
-      var joined=segs.join("\n");
-      // 表格块: 用整段做 md 检测
-      var tbl=mdTable(joined);
-      if(tbl){ html+=tbl; continue; }
-      // 列表
-      var safe=esc(b); var ls=safe.split("\n");
-      var isList=ls.length>0 && ls.every(function(line){ return /^\s*(?:[-*•]|\d+[.)])\s+/.test(line) || !line.trim(); });
-      if(isList){ html+="<ul>"+ls.filter(function(l){return l.trim();}).map(function(l){return "<li>"+l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/,"")+"</li>";}).join("")+"</ul>"; continue; }
-      // 标题行 (### / ##) 普通段落保留, 行内 **加粗** → <b>
-      var para=esc(b).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/^(结论|判断|证据|行动|建议|风险)[:：]/m,"<span class=\"ai-answer-label\">$1</span>：");
-      html+="<p>"+para.replace(/\n/g,"<br>")+"</p>";
-    }
-    return html;
-  }
-  function addMsg(text,who){
-    var m=document.getElementById("mAIWidgetMsgs");
-    var d=document.createElement("div"); d.className="ai-message "+(who==="user"?"user":"ai");
-    d.innerHTML='<span class="ai-message-avatar">'+(who==="user"?"你":"AI")+'</span><span class="ai-message-body"><span class="ai-message-meta">'+(who==="user"?"你":"经营诊断助手")+'</span><span class="ai-message-bubble"></span></span>';
-    d.querySelector(".ai-message-bubble").innerHTML=fmt(text);
-    m.appendChild(d); m.scrollTop=m.scrollHeight;
-    return d;
-  }
-
-  /* ── 多会话历史 (localStorage 本地存储, 零服务器流量) ──
-     结构: mAIWidget_hist = [{id,title,q0,msgs:[{who,text,ts}],updatedAt}]
-     当前会话 id: mAIWidget_cur */
-  function loadHist(){ try{ return JSON.parse(localStorage.getItem("mAIWidget_hist")||"[]"); }catch(e){ return []; } }
-  function saveHist(h){ try{ localStorage.setItem("mAIWidget_hist", JSON.stringify(h.slice(0,30))); }catch(e){/* 超限安全忽略 */} }
-  function loadCur(){ try{ return localStorage.getItem("mAIWidget_cur")||""; }catch(e){ return ""; } }
-  function saveCur(id){ try{ localStorage.setItem("mAIWidget_cur", id); }catch(e){} }
-  function loadConv(){ try{ return localStorage.getItem("mAIWidget_convId")||""; }catch(e){ return ""; } }
-  function saveConv(id){ try{ if(id) localStorage.setItem("mAIWidget_convId", id); }catch(e){} }
-  function clearConv(){ try{ localStorage.removeItem("mAIWidget_convId"); }catch(e){} }
-  /* 当前会话消息缓存 (切历史后暂存/恢复用) */
-  function saveMsgs(msgs){ try{ if(!msgs) msgs=getMsgs(); localStorage.setItem("mAIWidget_msgs_"+loadCur(), JSON.stringify(msgs)); }catch(e){} }
-  function getMsgs(){
-    var m=document.getElementById("mAIWidgetMsgs"), arr=[];
-    for(var i=0;i<m.children.length;i++){ var c=m.children[i];
-      var who=c.className.indexOf("user")>-1?"user":"ai";
-      var txt=c.querySelector(".ai-message-bubble").textContent;
-      arr.push({who:who,text:txt}); }
-    return arr;
-  }
-  function renderMsgs(msgs){
-    var m=document.getElementById("mAIWidgetMsgs"); m.innerHTML="";
-    (msgs||[]).forEach(function(msg){ addMsg(msg.text,msg.who); });
-    m.scrollTop=m.scrollHeight;
-  }
-
-  /* 发送 */
-  var busy=false;
-  var sendBtn=document.getElementById("mAIWidgetSend");
-  var input=document.getElementById("mAIWidgetInput");
-  var bodyLockState=null;
-  var focusBeforeOpen=null;
-  var composing=false;
-  function sendIconMarkup(){
-    return '<svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg>';
-  }
-  function resizeInput(){
-    input.style.height="auto";
-    input.style.height=Math.min(input.scrollHeight,132)+"px";
-  }
-  function syncSendState(){
-    var disabled=busy || !String(input.value||"").trim();
-    sendBtn.disabled=disabled;
-    sendBtn.setAttribute("aria-disabled",disabled?"true":"false");
-  }
-  function setBusy(flag){
-    busy=Boolean(flag);
-    if(busy){
-      sendBtn.classList.add("is-busy");
-      sendBtn.setAttribute("aria-busy","true");
-      sendBtn.setAttribute("aria-label","正在生成回答");
-      sendBtn.innerHTML="";
-    }else{
-      sendBtn.classList.remove("is-busy");
-      sendBtn.removeAttribute("aria-busy");
-      sendBtn.setAttribute("aria-label","发送问题");
-      sendBtn.innerHTML=sendIconMarkup();
-    }
-    syncSendState();
-  }
-  function lockBackground(){
-    if(bodyLockState || !document.body) return;
-    bodyLockState={scrollY:window.pageYOffset||document.documentElement.scrollTop||0,htmlOverflow:document.documentElement.style.overflow,bodyPosition:document.body.style.position,bodyTop:document.body.style.top,bodyWidth:document.body.style.width,bodyOverflow:document.body.style.overflow,htmlOverscroll:document.documentElement.style.overscrollBehavior,bodyOverscroll:document.body.style.overscrollBehavior};
-    document.documentElement.classList.add("ai-modal-open");
-    document.body.classList.add("ai-modal-open");
-    document.body.style.position="fixed";
-    document.body.style.top=(-bodyLockState.scrollY)+"px";
-    document.body.style.width="100%";
-    document.body.style.overflow="hidden";
-    document.documentElement.style.overscrollBehavior="none";
-    document.body.style.overscrollBehavior="none";
-  }
-  function unlockBackground(){
-    if(!bodyLockState || !document.body) return;
-    var s=bodyLockState; bodyLockState=null;
-    document.documentElement.classList.remove("ai-modal-open");
-    document.body.classList.remove("ai-modal-open");
-    document.documentElement.style.overflow=s.htmlOverflow;
-    document.documentElement.style.overscrollBehavior=s.htmlOverscroll;
-    document.body.style.position=s.bodyPosition;
-    document.body.style.top=s.bodyTop;
-    document.body.style.width=s.bodyWidth;
-    document.body.style.overflow=s.bodyOverflow;
-    document.body.style.overscrollBehavior=s.bodyOverscroll;
-    window.scrollTo(0,s.scrollY);
-  }
-  /* 键盘自适应(移动端全屏): 面板高度始终=visualViewport.height —
-     软键盘弹出时 vv.height 自动收窄到键盘上方, 输入框始终贴可视区底部, 天然跟随/不穿模/不超界 */
-  function bindKeyboard(){
-    var isMobile = window.matchMedia("(max-width:720px)").matches;
-    var lastVH = -1;
-    function refit(by){
-      if(panel.style.display!=="flex") return;
-      if(!isMobile){ panel.style.removeProperty("--ai-viewport-height"); return; }
-      var vv=window.visualViewport;
-      var h=(vv && vv.height>0)?vv.height:window.innerHeight;
-      if(h<200) h=200;                        /* 下限, 防极端收缩时面板塌陷 */
-      var round=Math.round(h);
-      var changed=(round!==lastVH);
-      lastVH=round;
-      if(changed){ panel.style.setProperty("--ai-viewport-height", round+"px"); }
-      /* ★ 2026-09-14 修复"底部乱跳": 不再无条件滚到底。
-         只在 ①高度真变了(键盘弹/收/打开) ②聚焦 ③本来就贴底 时才滚到底;
-         用户向上翻历史(离开底部)时, 纯滚动触发的 refit 不强制拉底 → 页面不再跳动。发消息时 send 已自行滚底。 */
-      var msgs=document.getElementById("mAIWidgetMsgs");
-      if(!msgs) return;
-      var nearBottom=(msgs.scrollTop+msgs.clientHeight>=msgs.scrollHeight-24);
-      if(by==="focus" || changed || nearBottom){ msgs.scrollTop=msgs.scrollHeight; }
-    }
-    var timer=null;
-    function schedule(by){ clearTimeout(timer); timer=setTimeout(function(){ refit(by); }, by==="focus"?0:40); }
-    input.addEventListener("focus", function(){ schedule("focus"); });
-    input.addEventListener("blur", function(){ schedule("blur"); });
-    if(window.visualViewport){
-      window.visualViewport.addEventListener("resize", function(){ schedule(); });
-      window.visualViewport.addEventListener("scroll", function(){ schedule(); });
-    }
-    window.addEventListener("resize", function(){ schedule(); });
-    window.addEventListener("orientationchange", function(){ schedule(); });
-  }
-  function persistHist(userQ){
-    try {
-      var hist=loadHist(); var cur=loadCur(); var now=Date.now();
-      var found=-1; for(var i=0;i<hist.length;i++){ if(hist[i].id===cur){ found=i; break; } }
-      var msgs=getMsgs();
-      if(found<0){
-        hist.unshift({ id:cur, title:(userQ||"新对话").slice(0,30), q0:(userQ||""), msgs:msgs, updatedAt:now });
-      } else {
-        hist[found].msgs=msgs; hist[found].updatedAt=now; if(hist[found].title==="新对话"&&userQ) hist[found].title=userQ.slice(0,30);
-        var rec=hist.splice(found,1)[0]; hist.unshift(rec);
-      }
-      saveHist(hist);
-    } catch(e){}
-  }
-  function _tokenOver(s){ return /token count exceeds|maximum number|invalid_param|INVALID_ARGUMENT|context length|too long/i.test(String(s||"")); }   // ★ 2026-10-06 上游输入超上限识别
-  function _emptyMsg(streamErr){
-    if(_tokenOver(streamErr))
-      return "AI 这次没能回答（已自动开新对话 + 压缩上下文重试，仍被上游拦下）。\n\n原因已定位：**输入内容超过上游模型上限**。常见于一次问得太宽（很多日期/很多线体）或对话轮数太多。\n\n上游原文："+String(streamErr).slice(0,160)+"\n\n建议：① 点右上角「+」开新对话再问；② 把问题问窄一点（只问某个车间/某一天）；③ 仍不行就截图给维护人。";
-    return streamErr ? ("AI 没有返回内容。\n\n上游报错："+String(streamErr).slice(0,200)+"\n\n已自动重试过，多为上游模型偶发空返回或限制；可点右上角「+」开新对话后再问。") : EMPTY_ANSWER_MSG;
-  }
-  var EMPTY_ANSWER_MSG="AI 这次没有返回内容（流式连接已结束，但没有拿到任何内容）。\n\n多为上游模型偶发空返回、并发达上限或额度用尽。\n建议：① 直接再问一次（多数一次就好）；② 仍为空就截图给维护人；③ 换个网络（如手机热点）再试。";   // ★ 2026-10-06 避免只看到“无响应”/卡在“正在分析…”
-  function askAI(q, isRetry){
-    setBusy(true);
-    var ctxText="";
-    try { ctxText = collectContext(q); }
-    catch(ctxErr){ ctxText = "（页面上下文构建异常, 已按最小上下文提问: " + ((ctxErr&&ctxErr.message)||ctxErr) + "）"; }   // ★ 2026-10-06 不再静默死掉
-    var payload={
-      query:q, context:ctxText.slice(0,12000),
-      mode:"pdtiii_operations_diagnosis_v2",
-      response_contract:"先给结论; 再列证据(日期、班次、车间/线体、正常段、加班段、合计); 再给不超过3项行动。需要对比时用 markdown 表格 输出, 列名清晰(日期/班次/车间/线体/正常产出/加班产出/合计/达成率)。没有数据就明确说未知或缺失, 不要把缺失当作0, 不要臆测根因。小标题直接写 历史、问题点、车间明细 等自然词, 不要用'区块''板块''模块'这类词。回答任意日期、白班、夜班、车间或线体问题时, 必须优先从 精确查询结果 读取对应日期 + 班次 + 成品线的独立数值; 页面当前选择的日期不构成查询范围, 不要说只能看到当前日期。只允许使用成品归档口径; 若归档质量为 partial/unknown 或字段为缺失, 必须明确标注数据质量，不得用其他工序产量补齐。当用户问及每日制程问题点（上下文中的【每日制程问题点日志】节）时，必须依据该节内容作答：泰语提问直接用日志中的泰语原文概括，中文提问先把泰语原文翻译成中文再总结；归因时依据『按日×部门汇总』的条数与影响合计，优先影响数(impact)大、出现频次高的问题，不得臆造。当用户询问某线体的最大/主要问题时（A线/B线/C线/D线、final A-D 线）：该线体一律指 PRO.2 装配车间的 final A-D 四条线，线体字母=问题点条目的班次首字母；只能依据【每日制程问题点日志】中该日期、该线体的条目作答，按影响数(impact)排序取最大并翻译其泰语描述，绝不引用其他车间名称相似的同字母线体。",
-      conversation_id:loadConv(), stream:true
-  };
-    var busyMsg=addMsg("正在分析…","ai");
-    var fullAnswer="";   // ★ 累积完整回答
-    var streamErr="";    // ★ 2026-10-06 捕获上游 error 事件(如 token 超上限 400)
-    // ★ DOM 定位最后一条 AI 气泡并复用(不依赖闭包缓存, 杜绝每块新建气泡)
-    function _liveBubble(){
-      var ms=document.getElementById("mAIWidgetMsgs");
-      for(var i=ms.children.length-1;i>=0;i--){ if(ms.children[i].className.indexOf("user")<0) return ms.children[i].querySelector(".ai-message-bubble"); }
-      addMsg("","ai");
-      return ms.lastElementChild.querySelector(".ai-message-bubble");
-    }
-    var ctrl=(typeof AbortController!=="undefined")?new AbortController():null;
-    var tmo=ctrl?setTimeout(function(){ctrl.abort();},120000):null;
-    function clearT(){ if(tmo){clearTimeout(tmo);tmo=null;} }
-    fetch(CFG.proxyUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal:ctrl?ctrl.signal:undefined})
-      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status);
-        if(r.body&&r.body.getReader&&payload.stream){
-          var reader=r.body.getReader(), dec=new TextDecoder(), acc="", cidSav="";
-          function flush(){ return reader.read().then(function(x){
-            if(x.done){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); if(!fullAnswer){ if(_tokenOver(streamErr)&&!isRetry){ clearConv(); return askAI(q,true); } _liveBubble().innerHTML=fmt(_emptyMsg(streamErr)); } return; }
-            acc+=dec.decode(x.value,{stream:true});
-            var lines=acc.split("\n"); acc=lines.pop();
-            for(var i=0;i<lines.length;i++){
-              var ln=lines[i].trim(); if(!ln.startsWith("data:"))continue;
-              var j=ln.slice(5).trim(); if(!j||j==="[DONE]")continue;
-              try{ var o=JSON.parse(j);
-                if((o.event==="agent_message"||o.event==="message")&&typeof o.answer==="string"){ fullAnswer+=o.answer; _liveBubble().innerHTML=fmt(fullAnswer); }
-                if(o.conversation_id)cidSav=o.conversation_id;
-                if(o.event==="error") streamErr=(String(o.code||"")+" "+(typeof o.message==="string"?o.message:JSON.stringify(o))).trim();
-                if(o.event==="message_end"){ clearT(); setBusy(false); if(cidSav)saveConv(cidSav); persistHist(q); if(!fullAnswer){ if(_tokenOver(streamErr)&&!isRetry){ clearConv(); if(reader.cancel)reader.cancel().catch(function(){}); return askAI(q,true); } _liveBubble().innerHTML=fmt(_emptyMsg(streamErr)); } if(reader.cancel)reader.cancel().catch(function(){}); return; }
-              }catch(e){}
-            }
-            return flush();
-          });}
-          return flush();
-        }
-        return r.json(); })
-      .then(function(data){ if(!data)return;
-        setBusy(false);
-        if(busyMsg && busyMsg.parentNode) busyMsg.remove();
-        if(data && data.conversation_id) saveConv(data.conversation_id);
-        var ans=(data && (data.answer||data.reply)) || "";
-        if(!ans){
-          // ★ 2026-10-06 代理 200 但无内容: 自动重试一次; 仍空给出可诊断原因, 不再只显示"无响应"
-          if(!isRetry){ clearConv(); askAI(q, true); return; }
-          var bits="";
-          if(data && data.error) bits += "\n- 代理返回: "+String(data.error).slice(0,160);
-          if(data && data.detail) bits += "\n- 上游原文: "+String(data.detail).slice(0,200);
-          ans="AI 这次没有返回内容（已自动重试 1 次，仍为空）。\n\n多为上游模型偶发空返回、并发达上限或额度用尽。\n建议：① 再问一次；② 仍为空就截图给维护人。"
-            + (bits?("\n\n诊断信息："+bits):"");
-        }
-        addMsg(String(ans),"ai");
-        persistHist(q);
-      })
-      .catch(function(e){
-        setBusy(false);
-        if(busyMsg && busyMsg.parentNode) busyMsg.remove();
-        addMsg("在线 AI 暂时不可用（"+e.message+"）。\n多为当前网络/DNS 拦截了 AI 代理地址，也可能是代理临时不可用；可换网络(如手机热点)后重试。","ai");
-        persistHist(q);
-      });
-  }
-  function send(){
-    if(busy) return;
-    var q=input.value.trim(); if(!q) return;
-    if(!loadCur()) saveCur("c"+Date.now());
-    addMsg(q,"user"); input.value=""; resizeInput(); syncSendState();
-    askAI(q);
-  }
-
-  /* 语音输入已删除，输入框只保留文本输入与发送。 */
-
-  /* ── 历史对话列表 ── */
-  var histDrawer=document.getElementById("mAIHistDrawer");
-  var histList=document.getElementById("mAIHistList");
-  function renderHist(){
-    var hist=loadHist();
-    if(!hist.length){ histList.innerHTML='<div class="ai-hist-empty">暂无历史对话</div>'; return; }
-    histList.innerHTML="";
-    var cur=loadCur();
-    hist.forEach(function(h){
-      var it=document.createElement("button");
-      it.className="ai-hist-item"+(h.id===cur?" active":"");
-      var d=new Date(h.updatedAt);
-      var ts=("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
-      it.innerHTML = "<span class=\"t\">"+esc(h.title)+"</span><span class=\"s\"><span>"+(d.getMonth()+1)+"-"+d.getDate()+" "+ts+"</span><span>"+h.msgs.length+" 条</span></span>";
-      it.addEventListener("click",function(){ openHist(h.id); });
-      histList.appendChild(it);
-    });
-  }
-  function openHist(id){
-    var hist=loadHist(); var rec=null; for(var i=0;i<hist.length;i++){ if(hist[i].id===id){ rec=hist[i]; break; } }
-    if(!rec) return;
-    // 暂存当前会话
-    saveMsgs();
-    saveCur(id);
-    clearConv();  // 历史会话不带服务端多轮上下文, 单发单收
-    renderMsgs(rec.msgs);
-    histDrawer.classList.remove("open");
-    renderHist();
-    addMsg("已切换到历史对话："+rec.title,"ai");
-  }
-  function newConversation(){
-    saveMsgs();
-    saveCur("c"+Date.now());
-    clearConv();
-    document.getElementById("mAIWidgetMsgs").innerHTML="";
-    histDrawer.classList.remove("open");
-    renderHist();
-    addMsg("已开启新对话。","ai");
-  }
-
-  /* 绑定 */
-  // 返回回到看板: 打开 AI 面板压入历史栈, 系统返回(Android back/iOS左滑/edge-swipe)先关闭面板回到看板, 不直接退出网页
-  function openPanel(){
-    if(panel.style.display === "flex") return;
-    focusBeforeOpen=document.activeElement;
-    lockBackground();
-    backdrop.classList.add("is-open");
-    panel.classList.add("is-open");
-    panel.style.display = "flex";
-    panel.style.removeProperty("--ai-viewport-height");
-    histDrawer.classList.remove("open");
-    renderHist();
-    // 若产出分析数据(含白班/夜班明细)尚未取到, 立即刷新, 让 AI 之后可按班次答
-    if (!(window.__ANA_DAYS__ && window.__ANA_DAYS__.length) && typeof reloadAnalytics === "function") {
-      reloadAnalytics();
-    }
-    syncSendState();
-    try{ history.pushState({ aiPanel:true }, ""); }catch(e){}
-    setTimeout(function(){ input.focus({preventScroll:true}); }, 120);
-  }
-  function closePanel(){
-    if (panel.style.display !== "flex") return;
-    histDrawer.classList.remove("open");
-    backdrop.classList.remove("is-open");
-    panel.classList.remove("is-open");
-    panel.style.display = "none";
-    unlockBackground();
-    if(focusBeforeOpen && typeof focusBeforeOpen.focus === "function"){
-      try{ focusBeforeOpen.focus({preventScroll:true}); }catch(e){ focusBeforeOpen.focus(); }
-    } else if(fab){ fab.focus(); }
-    focusBeforeOpen=null;
-  }
-  fab.addEventListener("click", openPanel);
-  backdrop.addEventListener("click", closePanel);
-  document.getElementById("mAIWidgetClose").addEventListener("click", function(){ closePanel(); try{ history.back(); }catch(e){} });
-  // 系统返回: 若 AI 面板开着 → 关闭它回到看板; 否则放行(回到主界面/退出)
-  window.addEventListener("popstate", function(e){
-    if (panel.style.display === "flex") closePanel();
-  });
-  document.getElementById("mAIWidgetReset").addEventListener("click",newConversation);
-  document.getElementById("mAIHistBtn").addEventListener("click",function(){ histDrawer.classList.toggle("open"); renderHist(); });
-  document.getElementById("mAIHistClose").addEventListener("click",function(){ histDrawer.classList.remove("open"); });
-  Array.prototype.forEach.call(panel.querySelectorAll(".ai-quick"),function(btn){
-    btn.addEventListener("click",function(){
-      input.value=btn.getAttribute("data-prompt")||"";
-      resizeInput(); syncSendState(); input.focus();
-    });
-  });
-  sendBtn.addEventListener("click",send);
-  bindKeyboard();
-  input.addEventListener("input",function(){ resizeInput(); syncSendState(); });
-  input.addEventListener("compositionstart",function(){ composing=true; });
-  input.addEventListener("compositionend",function(){ composing=false; });
-  input.addEventListener("keydown",function(e){
-    if(e.key==="Enter"&&!e.shiftKey&&!composing&&!e.isComposing&&e.keyCode!==229){ e.preventDefault(); send(); }
-  });
-  document.addEventListener("keydown",function(e){
-    if(e.key!=="Escape" || panel.style.display!=="flex") return;
-    closePanel();
-    if(history.state && history.state.aiPanel){ try{ history.back(); }catch(err){} }
-  });
-
-  addMsg("我是经营诊断助手。可以问：今天车间排名、昨天白班/夜班产出、加班产出、欠产最多的线、某日达成率等。","ai");
-  resizeInput();
-  syncSendState();
 })();
 </script>
 
