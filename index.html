@@ -558,7 +558,7 @@
   var MAIN_LINES = ["Final A line","Final B Line","Final C line","Final D line","Motor H-Series","Motor S-Series","Motor F-Series","Motor WL"];
   function normName(n){ return String(n||"").toLowerCase().replace(/\s+/g,""); }
   /* ★ 2026-10-16 线体改名: 电机的 AC 线 → "Motor FL" (数据端/库里仍叫 Motor AC, 前端入口统一改键) */
-  var NAME_ALIAS = { "motorac": "Motor FL" };
+  var NAME_ALIAS = { "motorac": "Motor FL", "motorflcl": "Motor FL CL" };
   function aliasName(n){ var a = NAME_ALIAS[normName(n)]; return a || n; }
   function aliasMapKeys(o){
     if (!o || typeof o !== "object") return o;
@@ -582,7 +582,8 @@
   //   Pro1=Motor6 / Pro2行1=Rotor+Final8 / Pro2行2=Shipping(=Inspection)4 / Pro3=Welding4
   //   Pro4行1=Frame No.1-5+Hon/Pist / Pro4行2=Body/Pin / Pro5=Frame/Piston/Cylinder Honing
   var WS_GROUPS = [
-    { ws: "PRO1",   label: "PRO1",            lines: ["Motor FL", "Motor CL", "Motor WL", "Motor F-Series", "Motor H-Series", "Motor S-Series"] },
+    // ★ 2026-11-04: MES 2026-11-01 17:23 起将 Motor AC 改名/合并为 Motor FL CL(与电脑端同步)
+    { ws: "PRO1",   label: "PRO1",            lines: ["Motor FL CL", "Motor WL", "Motor F-Series", "Motor H-Series", "Motor S-Series"] },
     { ws: "PRO2R",  label: "PRO2·Rotor/Fin",  lines: ["Final A line", "Final B Line", "Final C line", "Final D line", "Rotor A line", "Rotor B Line", "Rotor C line", "Rotor D Line"] },
     { ws: "PRO2S",  label: "PRO2·Shipping",   lines: ["Inspection A", "Inspection B", "Inspection C", "Inspection D", "Water Line"] },
     { ws: "PRO3",   label: "PRO3",            lines: ["Welding A line", "Welding B line", "Welding C line", "Welding D line"] },
@@ -604,6 +605,31 @@
   }
 
   var DATA_URL = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii.json";
+  // ★ 2026-11-04 补线体旁路源(与电脑端同一份数据逻辑): MES 改名后数据端白名单没补的线体。
+  //   主源有同名线 → 以主源为准(不重复); 旁路超过 10 分钟没更新 → 视为失效。
+  var EXTRA_URL = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii_extra.json";
+  function normKey(n){ return String(n||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+  function mergeExtraLines(){
+    return fetchJSON(EXTRA_URL).then(function(ex){
+      if (!ex || typeof ex !== "object") return;
+      var ts = ex.updatedAt ? new Date(String(ex.updatedAt).replace(" ","T")+"+07:00").getTime() : 0;
+      if (!ts || (Date.now()-ts) > 600000) return;
+      var have = {}; (state.lines||[]).forEach(function(l){ have[normKey(l.name)] = 1; });
+      (ex.lines||[]).forEach(function(l){
+        if (!l || !l.name) return;
+        var nm = aliasName(l.name), k = normKey(nm);
+        if (have[k]) return;
+        have[k] = 1; l.name = nm; state.lines.push(l);
+      });
+      var hx = ex.hourly || {};
+      Object.keys(hx).forEach(function(k){
+        var nm = aliasName(k), nk = normKey(nm);
+        if (state.hourly[nm]) return;
+        var dup = Object.keys(state.hourly).some(function(kk){ return normKey(kk) === nk; });
+        if (!dup && hx[k] && hx[k].length) state.hourly[nm] = hx[k];
+      });
+    }).catch(function(){});
+  }
 
   var state = { lines: [], updatedAt: null, hourly: {} };
   window.state = state;   // ★ 2026-09-11 AI: 暴露给 AI 模块读取实时数据 (电脑端 ai-widget 依赖 window.state)
@@ -1348,9 +1374,15 @@
         // ★ 2026-10-29 修「在产线被误清零」: 数据端有时不在换班时清零, 本班起点桶沿用上一班末桶值
         //   (实测 Inspection C: 800桶=上一班750桶终值; Welding C 同理) → startV=上一班累计 → 本班实际
         //   被误判「上一班残留」清零。判据: 起点之后有桶掉到 startV 以下 = 确实重新累计(线在产) → 不判残留。
+        // ★ 2026-11-04 与电脑端同步的重写判据: 只有 live 值钉死在起点桶值上才算残留。
+        //   live < 起点桶(计数器已重置, 线在产) / live > 起点桶(本班有产出) 一律不判残留,
+        //   否则早上 08:00 桶沿用上一班累计时会把在产线清零(实测 Final B 2026-11-04 4062 vs 292)。
         var resetSeen=false;
         if (startV!==null){ for (var ri=0;ri<pts.length;ri++){ if (pts[ri].m>sc.start && pts[ri].v<startV-0.5){ resetSeen=true; break; } } }
-        if (startV!==null && startV>0 && !resetSeen && act<=startV+0.5 && afterMax<=startV+0.5) carry=true;
+        var eqTol = startV===null ? 0 : Math.max(0.5, startV*0.005);
+        var flat = startV!==null && startV>0 && afterMax<=startV+0.5;
+        if (flat && !resetSeen && Math.abs(act-startV)<=eqTol) carry=true;
+        else if (flat && act<=0.5) carry=true;
         else if (startV===null && noShiftData && (l.stalled===true || String(l.status||"").toUpperCase()==="STALLED")){
           // ★ 2026-10-26 修复: 加「数据端已判停滞」门槛 — 旧逻辑只要求本班无桶就判残留,
           //   数据端夜班桶缺失时会把在产线整批误清零。
@@ -1726,7 +1758,8 @@
         // ★ 2026-09-10 改动C: 数据到位后更新停滞时间戳(需在 render 前)
         try { trackStallStart(); } catch(e){}
         // sampleNow(); // ★ v6.3 停用: 浏览器采样不再参与小时图分段(见 hValueAt/segHasData)
-        render();
+        // ★ 2026-11-04: 先合并补充线体再渲染(与电脑端同数据)
+        mergeExtraLines().then(function(){ render(); });
       } else {
         setConn(false);
       }

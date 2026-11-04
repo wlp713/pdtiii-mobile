@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-shell-v12'; // 2026-10-26 删除手机版 AI 入口, 强制刷新旧壳
+var CACHE = 'pdtiii-mobile-v10'; // 2026-11-04 补线体旁路源 + 起点桶守卫重写; // 2026-10-26 删除手机版 AI 入口, 强制刷新旧壳
 var CORE = [
   './',
   './index.html',
