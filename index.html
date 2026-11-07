@@ -179,12 +179,12 @@
   .lc-mid .cb.neg { color:var(--red); } .lc-mid .cb.pos { color:var(--green); }
   .lc-mid .lc-uph { margin-left:auto; color:var(--blue); }
   .lc-mid .lc-uph b { color:var(--blue); font-variant-numeric:tabular-nums; }
-  .bar { height:6px; border-radius:4px; background:rgba(10,14,23,.6); margin-top:9px; overflow:hidden; box-shadow:inset 0 1px 2px rgba(0,0,0,.4); }
-  .bar i { display:block; height:100%; border-radius:4px; background:var(--gray-dim); transition:width .6s cubic-bezier(.4,0,.2,1); position:relative; }
-  .bar i::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, rgba(255,255,255,.12), transparent); }
-  .bar i.ok { background:linear-gradient(90deg, rgba(61,220,132,.7), var(--green)); }
-  .bar i.warn { background:linear-gradient(90deg, rgba(232,163,61,.7), var(--orange)); }
-  .bar i.bad { background:linear-gradient(90deg, rgba(255,92,92,.7), var(--red)); }
+  /* v2: 与电脑版统一 —— 已达成=蓝, 未达成缺口=红; 条加粗到 14px(卡片很宽, 原 6px 像一条线) */
+  .bar { position:relative; height:14px; border-radius:7px; background:rgba(120,140,170,.22); margin-top:10px; overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,.5); }
+  .bar.hasplan { background:rgba(239,68,68,.42); }
+  .bar i { display:block; height:100%; border-radius:7px; min-width:3px; transition:width .6s cubic-bezier(.4,0,.2,1); position:relative;
+           background:linear-gradient(90deg, #2f6be0 0%, #3b82f6 55%, #66a9ff 100%); box-shadow:0 0 8px rgba(59,130,246,.4), inset 0 1px 0 rgba(255,255,255,.28); }
+  .bar i::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, rgba(255,255,255,.14), transparent 60%); }
 
   /* ── 问题点 ── */
   .prob-summary {
@@ -961,7 +961,7 @@
         + '<span>' + T("计划","Plan") + ' <b>' + fmt(p) + '</b></span>'
         + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span>'
         + '<span class="lc-uph">UPH <b>' + uphTxt(l, new Date()) + '</b></span></div>'
-        + '<div class="bar"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
+        + '<div class="bar' + (p>0 ? ' hasplan' : '') + '"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
         + '</div>';
     }
     if (x1 && x2){
@@ -1250,7 +1250,7 @@
           + '<span>'+tr("实际","Act")+' <b style="color:var(--white)">'+fmt(Math.round(sg.actual))+'</b></span>'
           + '<span>'+tr("计划","Plan")+' <b style="color:var(--white)">'+fmt(Math.round(sg.plan))+'</b></span>'
           + '</div>'
-          + '<div class="bar" style="margin-top:6px"><i class="'+(sCls||"")+'" style="width:'+Math.min(100,sr||0)+'%"></i></div>'
+          + '<div class="bar' + (sg.plan>0 ? ' hasplan' : '') + '" style="margin-top:6px;height:7px;border-radius:4px"><i class="'+(sCls||"")+'" style="width:'+Math.min(100,sr||0)+'%"></i></div>'
           + '<div class="ld-seg-cap" style="font-size:8.5px;color:var(--gray-dim);margin-top:3px;font-variant-numeric:tabular-nums">'+esc(fmtSegMin(sg.t0))+'–'+esc(fmtSegMin(sg.t1))+'</div>'
           + '</div>';
       });
@@ -1928,8 +1928,71 @@
 <!-- ★ 2026-09-03 PWA: 添加到主屏幕后全屏独立运行; SW 网络优先, 不缓存 Firebase 数据/live-data.js -->
 <script>
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('./sw.js?v=7').catch(function () {});
+  navigator.serviceWorker.register('./sw.js?v=8').catch(function () {});
 }
+</script>
+<script>
+/* ★ v2 进度条光粒子流(与电脑版同一效果): 仅 RUN 状态线体的达成条, 在已完成段内画
+   细沙光点 + 三团极淡磨砂光晕, 慢速向右漂移。每条 .bar 内嵌一张小画布 → 随列表滚动自然裁切。
+   零依赖; 减少动态效果偏好下不启动; 页面隐藏 rAF 自动暂停; 限 30fps 省电。 */
+(function () {
+  if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  var map = new WeakMap(), last = 0;
+  function spawn(p, w, first) {
+    p.x = first ? Math.random() * w : -2;
+    p.y = 0.12 + Math.random() * 0.76;
+    p.v = 5 + Math.random() * 11;
+    p.r = 0.3 + Math.random() * Math.random() * 0.55;
+    p.a = 0.3 + Math.random() * 0.45;
+    p.ph = Math.random() * 6.283;
+    p.w = 0.4 + Math.random() * 0.9;
+    return p;
+  }
+  function frame(t) {
+    requestAnimationFrame(frame);
+    if (t - last < 33) return;
+    var dt = Math.min(0.08, (t - last) / 1000); last = t;
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    var sts = document.querySelectorAll(".line-card .lc-status.st-run");
+    for (var i = 0; i < sts.length; i++) {
+      var card = sts[i].closest(".line-card"), bar = card && card.querySelector(".bar"), fill = bar && bar.querySelector("i");
+      if (!bar || !fill) continue;
+      var w = bar.clientWidth, h = bar.clientHeight, fw = fill.offsetWidth;
+      if (!w || !h) continue;
+      var o = map.get(bar);
+      if (!o) {
+        var c = document.createElement("canvas");
+        c.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none";
+        bar.appendChild(c);
+        o = { c: c, x: c.getContext("2d"), ps: [] }; map.set(bar, o);
+      }
+      if (o.c.width !== Math.round(w * dpr) || o.c.height !== Math.round(h * dpr)) { o.c.width = Math.round(w * dpr); o.c.height = Math.round(h * dpr); }
+      var ctx = o.x; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+      if (fw < 6) continue;
+      var n = Math.max(14, Math.min(70, Math.round(fw / 4)));
+      while (o.ps.length < n) o.ps.push(spawn({}, fw, true));
+      if (o.ps.length > n) o.ps.length = n;
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, fw, h); ctx.clip();
+      ctx.globalCompositeOperation = "lighter";
+      var span = fw + h * 8, gr = Math.max(h * 2.2, 12);
+      for (var k = 0; k < 3; k++) {
+        var gx = -h * 4 + ((t / 1000 * 10 + k * span / 3) % span), gy = h * (0.5 + 0.15 * Math.sin(t / 2600 + k * 2.1));
+        var g = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+        g.addColorStop(0, "rgba(235,245,255,.26)"); g.addColorStop(0.55, "rgba(220,235,255,.10)"); g.addColorStop(1, "rgba(220,235,255,0)");
+        ctx.fillStyle = g; ctx.fillRect(gx - gr, 0, gr * 2, h);
+      }
+      ctx.fillStyle = "rgb(240,248,255)";
+      for (var j = 0; j < o.ps.length; j++) {
+        var p = o.ps[j]; p.x += p.v * 0.8 * dt;
+        if (p.x > fw + 2) { spawn(p, fw, false); continue; }
+        ctx.globalAlpha = p.a * (0.6 + 0.4 * Math.sin(t / 1000 * p.w * 1.7 + p.ph));
+        ctx.beginPath(); ctx.arc(p.x, (p.y + 0.06 * Math.sin(t / 1000 * p.w + p.ph)) * h, p.r, 0, 6.2832); ctx.fill();
+      }
+      ctx.globalAlpha = 1; ctx.restore();
+    }
+  }
+  requestAnimationFrame(frame);
+})();
 </script>
 </body>
 </html>
