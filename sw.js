@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-v11'; // 2026-11-08 进度条加宽 + 蓝/红配色 + 光粒子流
+var CACHE = 'pdtiii-mobile-v12'; // 2026-11-09 小时产出分时段(含夜班) + 三列新样式 + 趋势改读归档 + 质感统一
 var CORE = [
   './',
   './index.html',

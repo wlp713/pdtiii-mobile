@@ -403,7 +403,17 @@
   @media (min-width:600px){ .ld-seg-grid{ grid-template-columns:1fr 1fr 1fr; } }
   .ld-seg { background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 9px 5px; }
   
-  </style>
+    /* ═══ 2026-11-09 质感统一(与电脑端): 卡面细渐变 + 蓝调描边, 去掉逐卡 backdrop-filter(深底无效、低配机耗电) ═══ */
+  .kpi, .sec { backdrop-filter:none; -webkit-backdrop-filter:none;
+    background: linear-gradient(180deg, rgba(20,30,50,.78) 0%, rgba(12,18,32,.88) 60%, rgba(9,13,24,.94) 100%);
+    border-color: rgba(90,180,255,.13); }
+  .line-card, .hc-card, .trend-card { background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)); border-color: rgba(255,255,255,.075); }
+  .kpi .sub { color: var(--gray); opacity:.85; }
+  .kpi .val, .lc-top, .hc-rat, .sec-h .tag { font-variant-numeric: tabular-nums; }
+  .hc-card .hc-sub, #hourlyHint { display:none; }
+  .hc-card.idle { opacity:.55; }
+  .hc-card svg { display:block; width:100%; height:auto; margin-top:2px; }
+</style>
 </head>
 <body>
 <header>
@@ -1036,7 +1046,27 @@
 
   /* ── 趋势 (__HISTORY__) ── */
   var trendSel = null;
+  // ★ 2026-11-09(同步电脑端): 趋势数据源改为 history/analytics.json(归档任务每 30 分钟更新);
+  //   旧源 live-data.js 的 __HISTORY__ 自 09-18 停更 → 趋势停在 9 月。
+  //   日达成率 = 白+夜正常产量 ÷ 计划(未开班不计), 与电脑端「每日达成率」同口径。
+  var anaDays = null;
+  function loadAnalytics(){
+    fetchJSON("https://wlp713.github.io/pdtiii-live/history/analytics.json").then(function(a){
+      if (!a || !Array.isArray(a.days)) return;
+      anaDays = a.days.map(function(day){
+        var rec = { date: day.date, lines: {} };
+        Object.keys(day.lines || {}).forEach(function(n){
+          var v = day.lines[n] || {}, out = 0, plan = 0;
+          ["day", "night"].forEach(function(s){ var x = v[s]; if (x && Number(x.normal) > 0 && Number(x.plan) > 0){ out += Number(x.normal); plan += Number(x.plan); } });
+          if (plan > 0) rec.lines[n] = Math.round(out / plan * 1000) / 10;
+        });
+        return rec;
+      }).filter(function(r){ return Object.keys(r.lines).some(function(k){ return r.lines[k] > 0; }); });
+      renderTrend();
+    });
+  }
   function getHistory(){
+    if (anaDays && anaDays.length) return anaDays.slice(-10);
     var h = window.__HISTORY__;
     if (!Array.isArray(h)) return [];
     aliasLiveData();
@@ -1471,7 +1501,9 @@
       // ★ 2026-10-18: 开班桶(8:00/20:30)按定义累计=0。停产日无人换班清零 → 首条记录仍是上一班终值,
       //   不归零的话小时图第一段会把上一班整整一班产量画成巨柱。
       var _nMi2=bkkMin(); var _shiftStart2=((_nMi2<NIGHT_END?_nMi2+1440:_nMi2)>=NIGHT_START)?NIGHT_START:480;
-      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; var m2=snapMins(sn); if (post && m2<NIGHT_END) m2+=1440; var _d=sn.d; if(_d!==undefined && _d!==null && String(_d)!==""){ if(String(_d)!==_curDaily) continue; } else if (isDayQry && !(m2>=8*60 && m2<=DAY_END)) continue; var _v2=usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0); if (m2===_shiftStart2) _v2=0; pts.push({ m:m2, v:_v2 }); }
+      // ★ 2026-11-09(同步电脑端): 夜班查询不吃白班桶 — 否则夜班边界取到今天白班累计, 下钻「逐段产出」显示白班累计
+      var _nightQry = post || t >= NIGHT_START;
+      for (var j=0;j<snaps.length;j++){ var sn=snaps[j]; var m2=snapMins(sn); if (post && m2<NIGHT_END) m2+=1440; if (_nightQry && m2<NIGHT_START) continue; var _d=sn.d; if(_d!==undefined && _d!==null && String(_d)!==""){ if(String(_d)!==_curDaily) continue; } else if (isDayQry && !(m2>=8*60 && m2<=DAY_END)) continue; var _v2=usePlan?(Number(sn.plan)||0):(Number(sn.actual)||0); if (m2===_shiftStart2) _v2=0; pts.push({ m:m2, v:_v2 }); }
       pts.sort(function(a,b){ return a.m-b.m; });
       var tAbs = t; // 查询边界直接用班次日分钟 (day 同制)
       var lo=null, hi=null, hiN=null;
@@ -1503,6 +1535,19 @@
     for (var i=0;i<snaps.length;i++){ var m = snapMins(snaps[i]); if (m>=t0A-13 && m<=t1A+13) return true; }
     return false;
   }
+  // 开班 30 分钟内实时计划 ≥ 上一班终值计划 80% → 数据端未清零的旧值(同电脑端 staleShiftStart)
+  function staleShiftStartM(name, isNight, cmpMins, curPlan){
+    var el = cmpMins - (isNight ? NIGHT_START : 480);
+    if (!(el >= 0 && el < 30) || !(Number(curPlan) > 0)) return false;
+    var d = bkkDateStrM(bkkDay0() - (isNight ? 0 : 86400000)), prevP = 0;
+    var arr = (state.hourly||{})[hourlyKeyOf(name)] || [];
+    for (var i=0;i<arr.length;i++){
+      if (String(arr[i].d||"") !== d) continue;
+      var m = snapMins(arr[i]);
+      if (isNight ? (m >= 480 && m <= DAY_END) : (m < NIGHT_END)) prevP = Math.max(prevP, Number(arr[i].plan)||0);
+    }
+    return prevP > 0 && Number(curPlan) >= prevP * 0.8;
+  }
   // 本班次已开始段: 每段产量 = 段末累计 − 段初累计 (开班首段从0; 跨换班清零差分<0 → 取段末值)
   function segsOfHour(name, curActual, curPlan, curTarget){
     var nowMins = bkkMin();
@@ -1513,9 +1558,12 @@
     var postMid = isNight && nowMins < NIGHT_END;   // 凌晨0-8点属夜班次日
     var cmpMins = postMid ? nowMins+24*60 : nowMins;
     var firstIdx = 0;
+    // ★ 2026-11-09(同步电脑端): 开班 30 分钟内 lines 仍是上一班终值(数据端未清零) → 本班实时值按 0
+    if (staleShiftStartM(name, isNight, cmpMins, curPlan)){ curActual = 0; curPlan = 0; }
     // ★ 2026-09-14 夜班折叠(同步电脑端): 无前半夜[1230,1440)桶时前4段边界不可解析
     //   → 折叠成一根「前半夜」基准段(值=00:30累计=前半夜整段), 避免 seg1=整夜累计巨柱 + seg2/3=0。
-    if (postMid){
+    // ★ 2026-11-09: 折叠判断扩到整个夜班(20:30 起), 前半夜有自录桶就正常分段; 20:30-00:30 折叠段=实时累计
+    if (isNight){
       var preArr = (state.hourly||{})[hourlyKeyOf(name)] || null;
       var hasPreMid = false;
       // ★ 2026-09-15 修复: hasPreMid 必须按当前班里日(d)过滤 — 旧桶(其它日期的)不能算有前半夜覆盖,
@@ -1530,9 +1578,10 @@
           } }
       }
       if (!hasPreMid){
-        var bA = Math.max(0, hValueAt(name, 1470, false, -1)); // 00:30 累计实际 = 前半夜整段
-        var bP = Math.max(0, hValueAt(name, 1470, true, -1));  // 00:30 累计目标
-        segs.push({ h:1470/60, lab:null, live:false, base:true, nightBase:true, pm:false, actual:bA, plan:bP, t0:NIGHT_START, t1:1470 });
+        var foldLive = cmpMins < 1470;
+        var bA = foldLive ? Math.max(0, Number(curActual)||0) : Math.max(0, hValueAt(name, 1470, false, -1)); // 00:30 累计 = 前半夜整段
+        var bP = foldLive ? Math.max(0, Number(curPlan)||0) : Math.max(0, hValueAt(name, 1470, true, -1));
+        segs.push({ h:Math.min(cmpMins,1470)/60, lab:null, live:foldLive, base:true, nightBase:true, pm:false, actual:bA, plan:bP, t0:NIGHT_START, t1:Math.min(cmpMins,1470) });
         firstIdx = 4; // 跳过已折叠 seg1-4
       }
     }
@@ -1575,62 +1624,61 @@
   // 桌面参考: 每线两根纵柱 — 左=实际(蓝, 段内灰缺口+蓝达成), 右=目标(橙),
   //   两柱共用同一份 segs(按目标值从底向上堆叠) → 段边界逐段对齐, 段内写该时段数值,
   //   柱顶写当班累计。maxV 每卡独立(小产量线不至于矮到看不见; 达成对比看卡头大字%)。
-  function hcCardSVG(segs, totActual, totPlan){
-    var W=176, H=172, padT=24, padB=4;
-    var iw=W, ih=H-padT-padB;
-    var cx=W/2, bw=30, gap=8;             // 双柱: 左柱中心 cx-gap/2-bw/2 …
-    var maxV=Math.max(totPlan, totActual);
-    // ★ 2026-10-06 修复(同步电脑端): 满格基准必须覆盖分段骨架总和, 否则「段值远大于 header 当前值」时
-    //   (夜班下的纯白班线) 每段 ph 溢出画布 → 两柱都被涂满 = 假相等。
-    var _segSum=0;
-    for (var _j=0;_j<segs.length;_j++){ _segSum += Math.max(0, Math.max(segs[_j].actual||0, segs[_j].plan||0)); }
-    if (_segSum>maxV) maxV=_segSum;
-    if (maxV<=0) maxV=10;
-    maxV = Math.ceil(maxV*1.16/10)*10;     // 顶部留 ~16% 给柱顶数字
-    var yb = padT+ih;                       // 柱底基线
-    var s='';
-    // 灰缺口/柱底深色背景描边仅用于视觉; 逐段堆叠, 从底向上 (segs 按时间升序 → 正序画: 早段在下, live 最新段在最顶, 与桌面一致)
-    var yAcc = yb;
-    for (var i=0;i<segs.length;i++){
-      var seg = segs[i];
-      // 段层高 = 该段目标值(骨架)占比; 若段无目标(plan=0)但有实际 → 用实际兜底
-      var ph = (seg.plan>0 ? seg.plan : seg.actual) / maxV * ih;
-      if (ph < 1.2) ph = 1.2;
-      var yTop = yAcc - ph;
-      var isLive = seg.live;
-      // live 段淡蓝底罩(横贯两柱)
-      if (isLive) s += '<rect x="'+(cx-gap/2-bw-4)+'" y="'+yTop.toFixed(1)+'" width="'+(bw*2+gap+8)+'" height="'+ph.toFixed(1)+'" fill="rgba(88,166,255,.09)" rx="2"/>';
-      // ── 实际柱(左) ── 灰缺口打底, 蓝画达成部分
-      var xa = cx - gap/2 - bw;
-      var ha = Math.min(ph, seg.actual/maxV*ih);       // 超额 → 蓝画满层(柱顶数字显真实值)
-      s += '<rect x="'+xa+'" y="'+yTop.toFixed(1)+'" width="'+bw+'" height="'+ph.toFixed(1)+'" fill="rgba(10,14,23,.6)"/>';
-      if (ha>0) s += '<rect x="'+xa+'" y="'+(yAcc-ha).toFixed(1)+'" width="'+bw+'" height="'+ha.toFixed(1)+'" fill="#58a6ff"/>';
-      // ── 目标柱(右) ── 橙
-      var xp = cx + gap/2;
-      s += '<rect x="'+xp+'" y="'+yTop.toFixed(1)+'" width="'+bw+'" height="'+ph.toFixed(1)+'" fill="#e8a33d" opacity=".94"/>';
-      // ── 段边界黑线(横贯两柱, 桌面加粗口径)
-      s += '<rect x="'+(cx-gap/2-bw-1)+'" y="'+yTop.toFixed(1)+'" width="'+(bw*2+gap+2)+'" height="1.6" fill="#000"/>';
-      // ── 段内数值: 实际柱写实际达成, 目标柱写该段目标; 字体随段高自适应; live 段字号-1 不喧宾夺主
-      var fs = ph>=24?8.5:ph>=18?8:ph>=13?7.5:ph>=9.5?7:ph>=7?6.5:0;
-      if (fs>0 && ph>=10){
-        var fs2 = isLive ? Math.max(6,fs-1) : fs;
-        s += '<text x="'+(xa+bw/2)+'" y="'+(yAcc-ph/2+fs2*0.35).toFixed(1)+'" text-anchor="middle" font-size="'+fs2+'" font-weight="700" fill="#e6edf3">'+Math.round(seg.actual)+'</text>';
-        s += '<text x="'+(xp+bw/2)+'" y="'+(yAcc-ph/2+fs2*0.35).toFixed(1)+'" text-anchor="middle" font-size="'+fs2+'" font-weight="700" fill="#0a0e17">'+Math.round(seg.plan)+'</text>';
+  // ★ 2026-11-09 v2(同步电脑端小时产出新版): 每卡三列 = 实际柱 | 计划柱 | 差额列。
+  //   纵轴按已过时段等高分行(hcRows, 全部卡片共用 → 同一时段同一水平线), 行内按该段 max(实际,计划) 满格;
+  //   实际柱: 蓝=实际, 红斜纹=欠产缺口, 绿顶=超产; 计划柱: 金; 差额列: −欠(红)/+超(绿)。
+  //   数字等比放大到贴柱边; 柱顶不写累计(卡头已有达成率); 全天无实际(未开班/停线)整卡置灰。
+  var hcRows = 1, hcCurIdx = 1;
+  var HC_FF = '"Segoe UI","Microsoft YaHei",sans-serif';
+  function hcSpan(seg){ return seg.nightBase ? (seg.live ? Math.max(1, Math.min(4, hcCurIdx)) : 4) : 1; }
+  function hcRowEnd(seg){ return (seg.lab ? seg.lab - 1 : 0) + hcSpan(seg); }
+  function hcPrepRows(list){ // list: [segs...] → 全部卡共用行数
+    hcCurIdx = shiftSegAt(bkkMin()).idx || 1;
+    var r = 1;
+    list.forEach(function(segs){ segs.forEach(function(s){ r = Math.max(r, hcRowEnd(s)); }); });
+    hcRows = r;
+  }
+  function hcCardSVG(segs){
+    var W=176, H=176, padT=4, padB=4, ch=H-padT-padB, GAP=2;
+    var DW=40, SP=3, bw=Math.min(46, (W-8-DW-SP*2)/2), gw=bw*2+SP*2+DW, x0=(W-gw)/2;
+    var xa=x0, xp=x0+bw+SP, xd=xp+bw+SP+DW/2;
+    var rowH=(ch-GAP*(hcRows-1))/hcRows;
+    var zero = segs.every(function(s){ return !(s.actual > 0); });
+    var fBase = Math.min(22, (bw-3)/1.8);                    // 按 3 位数贴柱边(数字约 0.6em 宽)
+    var txt = function(t, x, y, maxW, f, color){
+      f = Math.max(7, Math.min(f, maxW/(0.6*String(t).length)));
+      return '<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="middle" dominant-baseline="central" font-family=\''+HC_FF+'\' font-size="'+f.toFixed(1)+'" font-weight="700" fill="'+color+'">'+t+'</text>';
+    };
+    var s = '<defs><pattern id="hcStripe" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
+      + '<rect width="6" height="6" fill="rgba(248,81,73,.16)"/><rect width="2" height="6" fill="rgba(248,81,73,.6)"/></pattern></defs>';
+    segs.forEach(function(seg){
+      var r0 = seg.lab ? seg.lab-1 : 0, span = hcSpan(seg);
+      var y = padT+ch - r0*(rowH+GAP), h = span*rowH+(span-1)*GAP, top = y-h;
+      var a = seg.actual||0, p = seg.plan||0, m = Math.max(a, p, 1);
+      var aH = a/m*h, pH = p/m*h, d = Math.round(a)-Math.round(p), lo = Math.min(aH, pH);
+      // 实际柱
+      s += '<rect x="'+xa+'" y="'+top.toFixed(1)+'" width="'+bw+'" height="'+h.toFixed(1)+'" rx="3" fill="rgba(255,255,255,.04)"/>';
+      if (!zero && a < p) s += '<rect x="'+xa+'" y="'+top.toFixed(1)+'" width="'+bw+'" height="'+(h-aH).toFixed(1)+'" rx="3" fill="url(#hcStripe)"/>';
+      if (lo > 0) s += '<rect x="'+xa+'" y="'+(y-lo).toFixed(1)+'" width="'+bw+'" height="'+lo.toFixed(1)+'" rx="3" fill="#4c9aff"/>';
+      if (a > p) s += '<rect x="'+xa+'" y="'+top.toFixed(1)+'" width="'+bw+'" height="'+(aH-pH).toFixed(1)+'" rx="3" fill="#3fb950"/>';
+      // 计划柱
+      s += '<rect x="'+xp+'" y="'+top.toFixed(1)+'" width="'+bw+'" height="'+h.toFixed(1)+'" rx="3" fill="rgba(255,255,255,.04)"/>';
+      if (pH > 0) s += '<rect x="'+xp+'" y="'+(y-pH).toFixed(1)+'" width="'+bw+'" height="'+pH.toFixed(1)+'" rx="3" fill="#b8923f"/>';
+      if (seg.live) s += '<rect x="'+(xa-2)+'" y="'+(top-2).toFixed(1)+'" width="'+(bw*2+SP+4)+'" height="'+(h+4).toFixed(1)+'" rx="4" fill="none" stroke="#58a6ff" stroke-width="2"/>';
+      // 数据标签
+      if (h >= 11 && (a > 0 || p > 0)){
+        var f = Math.min(fBase, h*0.7);
+        if (aH >= f+4) s += txt(Math.round(a), xa+bw/2, y-Math.min(aH,h)/2, bw-3, f, "#fff");
+        else s += txt(Math.round(a), xa+bw/2, top+h/2, bw-3, f, zero ? "#6e7a8c" : "#ff9b94");
+        s += txt(Math.round(p), xp+bw/2, y-Math.min(Math.max(pH, f+4), h)/2, bw-3, f, "#fff8e6");
+        if (d !== 0) s += txt((d>0?"+":"−")+Math.abs(d), xd, top+h/2, DW-2, f, zero ? "#5d6878" : (d<0 ? "#ff7b72" : "#56d364"));
       }
-      yAcc = yTop;
-    }
-    // 柱顶累计(两柱同基线, 写在各柱正上方)
-    if (segs.length){
-      var yTxt = yAcc - 6;
-      if (yTxt < 11) yTxt = 11;
-      var maxReached = Math.max(totActual, totPlan);
-      s += '<text x="'+(cx-gap/2-bw/2)+'" y="'+yTxt+'" text-anchor="middle" font-size="9" font-weight="800" fill="'+(totActual>=totPlan?'#3ddc84':'#5aa9ff')+'">'+fmt(Math.round(totActual))+'</text>';
-      s += '<text x="'+(cx+gap/2+bw/2)+'" y="'+yTxt+'" text-anchor="middle" font-size="9" font-weight="800" fill="#e8a33d">'+fmt(Math.round(totPlan))+'</text>';
-    }
+    });
     return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'+s+'</svg>';
   }
 
   function hcSubLine(segs){
+    return ''; // 2026-11-09: 时段信息已在区块标签(夜班 · 段 N), 卡底不再重复
     if (!segs.length) return '';
     var dv = segs[segs.length-1];
     return tr("第","Seg ")+dv.lab+' · '+fmtSegMin(dv.t0)+'-'+fmtSegMin(dv.t1)+(dv.live?tr(" 进行中"," live"):'');
@@ -1658,17 +1706,19 @@
     var grid = $("hourlyGrid");
     var html = "";
     var any = false;
-    mains.forEach(function(l){
+    var segsList = mains.map(function(l){ return segsOfHour(l.name, Number(l.actual)||0, Number(l.plan)||0); });
+    hcPrepRows(segsList);                                     // ★ 2026-11-09: 全部卡共用时段行
+    mains.forEach(function(l, li){
       var curActual = Number(l.actual)||0, curPlan = Number(l.plan)||0;
-      var segs = segsOfHour(l.name, curActual, curPlan);
+      var segs = segsList[li];
       if (segs.length) any = true;
       var r = curPlan>0 ? curActual/curPlan*100 : NaN;
       var rCls = isNaN(r) ? "none" : (r>=90?"good":(r>=70?"warn":"bad"));
       var st = String(l.status||"");
       var dot = (/run|work|开/i.test(st)) ? "run" : (/stop|停/i.test(st)) ? "stop" : "";
-      var segBody = segs.length ? hcCardSVG(segs, curActual, curPlan)
+      var segBody = segs.length ? hcCardSVG(segs)
         : '<div class="chart-empty" style="padding:26px 0 20px">'+T("暂无数据","—")+'</div>';
-      html += '<div class="hc-card" data-line="'+esc(l.name)+'">'
+      html += '<div class="hc-card'+(curActual>0?'':' idle')+'" data-line="'+esc(l.name)+'">'
         + '<div class="hc-head"><span class="hc-name">'+(dot?'<i class="dot '+dot+'"></i>':'')+esc(shortName(l.name))+'</span>'
         + '<span class="hc-rat '+rCls+'">'+(isNaN(r)?'--':r.toFixed(0)+'%')+'</span></div>'
         + segBody
@@ -1692,18 +1742,23 @@
     if (!grid) return;
     var empty = grid.querySelector(".chart-empty");
     if (empty && grid.children.length===1) return; // 整区空态, 无需刷
-    Array.prototype.forEach.call(grid.querySelectorAll(".hc-card"), function(card){
+    var cards = Array.prototype.slice.call(grid.querySelectorAll(".hc-card"));
+    var segMap = {};
+    cards.forEach(function(card){ var l0 = lineOf(card.getAttribute("data-line")); if (l0) segMap[l0.name] = segsOfHour(l0.name, Number(l0.actual)||0, Number(l0.plan)||0); });
+    hcPrepRows(Object.keys(segMap).map(function(k){ return segMap[k]; }));
+    cards.forEach(function(card){
       var l = lineOf(card.getAttribute("data-line"));
       if (!l) return;
       var curActual = Number(l.actual)||0, curPlan = Number(l.plan)||0;
-      var segs = segsOfHour(l.name, curActual, curPlan);
+      var segs = segMap[l.name] || [];
+      card.classList.toggle("idle", !(curActual > 0));
       var r = curPlan>0 ? curActual/curPlan*100 : NaN;
       var rCls = isNaN(r) ? "none" : (r>=90?"good":(r>=70?"warn":"bad"));
       var rat = card.querySelector(".hc-rat");
       if (rat){ rat.className = "hc-rat "+rCls; rat.textContent = isNaN(r)?'--':r.toFixed(0)+'%'; }
       var sub = card.querySelector(".hc-sub");
       if (sub) sub.textContent = hcSubLine(segs);
-      var body = segs.length ? hcCardSVG(segs, curActual, curPlan)
+      var body = segs.length ? hcCardSVG(segs)
         : '<div class="chart-empty" style="padding:26px 0 20px">'+T("暂无数据","—")+'</div>';
       var oldSvg = card.querySelector("svg"), oldEm = card.querySelector(".chart-empty");
       if (oldSvg) oldSvg.outerHTML = body;
@@ -1741,6 +1796,33 @@
     txt.textContent = ok ? (stale ? T("数据已停更","STALE") : T("已连接","LIVE")) : T("连接异常","OFFLINE");
   }
 
+  // ★ 2026-11-09 夜班前半夜小时桶(与电脑端同源): 数据端从不写 20:30-23:30 桶, 由电脑大屏在
+  //   21:30/22:30/23:30 边界自录到 Firebase pdtiii_night/<班次日>/<h> = [{n,a,p}]。手机端只读、不写,
+  //   合并成 {h,d,actual,plan} 桶补进 state.hourly, 另补开班 20:30=0 桶。
+  var NIGHT_FB = "https://dm111-e8a7d-default-rtdb.firebaseio.com/pdtiii_night/";
+  var nightDoc = { d:null, at:0, data:{} };
+  function loadNightBuckets(){
+    var mi = bkkMin(), pre = mi >= NIGHT_START, post = mi < NIGHT_END;
+    if (!pre && !post) return Promise.resolve();
+    var d = bkkDateStrM(bkkDay0() - (post ? 86400000 : 0));
+    var p = (nightDoc.d === d && Date.now() - nightDoc.at < 60000) ? Promise.resolve(nightDoc.data)
+      : fetchJSON(NIGHT_FB + d + ".json").then(function(x){   // fetchJSON 失败返回 null(不抛)
+          if (x == null && nightDoc.d === d) return nightDoc.data;     // 网络抖动: 保留上次
+          nightDoc = { d:d, at:Date.now(), data:x || {} }; return nightDoc.data; });
+    return p.then(function(data){
+      var hs = Object.keys(data || {}); if (!hs.length) return;
+      state.hourly = state.hourly || {};
+      var put = function(name, h, a, pl){
+        var k = hourlyKeyOf(name), arr = state.hourly[k];
+        if (!arr){ arr = []; state.hourly[k] = arr; }
+        for (var i = arr.length - 1; i >= 0; i--) if (Number(arr[i].h) === h) arr.splice(i, 1); // 去同号旧桶(09-11 死桶)
+        arr.push({ h:h, d:d, actual:a, plan:pl });
+      };
+      var names = {};
+      hs.forEach(function(h){ (data[h] || []).forEach(function(r){ if (r && r.n){ names[r.n] = 1; put(r.n, Number(h), Number(r.a)||0, Number(r.p)||0); } }); });
+      Object.keys(names).forEach(function(n){ put(n, 2030, 0, 0); });
+    });
+  }
   /* ── 主循环 ── */
   function loadMain(){
     fetchJSON(DATA_URL).then(function(d){
@@ -1759,7 +1841,8 @@
         try { trackStallStart(); } catch(e){}
         // sampleNow(); // ★ v6.3 停用: 浏览器采样不再参与小时图分段(见 hValueAt/segHasData)
         // ★ 2026-11-04: 先合并补充线体再渲染(与电脑端同数据)
-        mergeExtraLines().then(function(){ render(); });
+        // ★ 2026-11-09: 合并大屏自录的夜班前半夜小时桶(只读) → 夜班 1-4 段正常分开
+        mergeExtraLines().then(loadNightBuckets).then(function(){ render(); }, function(){ render(); });
       } else {
         setConn(false);
       }
@@ -1916,6 +1999,7 @@
 
   setInterval(loadMain, 60000);
   setInterval(drawHourlyLive, 10000); // 小时产出: 每10秒轻刷当前段/图 (chips 不重建)
+  loadAnalytics(); setInterval(loadAnalytics, 30 * 60 * 1000); // ★ 2026-11-09 趋势: 归档汇总, 与归档任务同频
   setInterval(reloadLiveData, 600000); // 10分钟
   setInterval(reloadAnalytics, 600000); // 2026-09-11 AI: 10分钟同步产出分析快照
   setInterval(reloadDailyProblems, 600000); // 2026-10-07 AI: 10分钟同步每日制程问题点日志
