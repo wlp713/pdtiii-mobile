@@ -425,6 +425,79 @@
   .line-card.idle .bar i { display:none; }
   .lc-rate { text-shadow:none; }
   .hc-card.idle .hc-name .dot { background: var(--gray-dim); box-shadow:none; }
+  /* ═══ v10(2026-11-16, 与电脑端同一方向): 扁平纯色块 · KPI 大数字+状态条(不增高) · 线体卡左侧状态色条 · 达成率胶囊 · 90% 刻度 ═══ */
+  :root { --num: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "sans-serif-condensed", -apple-system, "Segoe UI", sans-serif;
+          --ok: #22c58b; --warn: #f5a524; --bad: #f04848; --card: #111b2c; }
+  /* 扁平: 去渐变、去投影、去顶缘高光线 */
+  .kpi, .sec { background: #0d1626; box-shadow: none; border-color: rgba(120,160,220,.13); }
+  .line-card, .hc-card, .trend-card { background: var(--card); border-color: rgba(120,160,220,.10); box-shadow: none; }
+  .kpi::before, .sec::before, .line-card::before, .trend-card::before, .hc-card::before { display: none; }
+  .sec-h::before { background: #3b82f6; box-shadow: none; }
+  /* KPI */
+  .kpi { padding: 11px 14px 13px; }
+  .kpi .sub { display: none; }
+  .kv { display: flex; align-items: baseline; gap: 2px; margin-top: 3px; white-space: nowrap; }
+  .kpi .val, .kpi .val.green, .kpi .val.red, .kpi .val.orange, .kpi .val.blue { font-family: var(--num); font-size: 30px; font-weight: 700; letter-spacing: 0; margin-top: 0; line-height: 1; }
+  .kpi .val.green { color: var(--ok); } .kpi .val.orange { color: var(--warn); } .kpi .val.red { color: var(--bad); }
+  #kpiFinal, #kpiMotor { color: var(--white); }
+  .kden { font-family: var(--num); font-size: 15px; font-weight: 600; color: var(--gray); }
+  .kmeter { display: flex; position: relative; height: 5px; margin-top: 10px; gap: 3px; }
+  .kmeter.none { visibility: hidden; }
+  .kmeter.bar { background: rgba(160,185,225,.10); border-radius: 3px; }
+  .kmeter i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; overflow: hidden; }
+  .kmeter i.tick { left: 90%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: rgba(225,235,250,.6); }
+  .kmeter b { position: relative; flex: 1; border-radius: 3px; background: rgba(160,185,225,.10); overflow: hidden; }
+  .kmeter .ok { background: var(--ok); } .kmeter .warn { background: var(--warn); } .kmeter .bad { background: var(--bad); }
+  /* 小特效: 状态条扫光(分段依次扫过); 减少动效时关闭 */
+  @keyframes kSweep { 0% { transform: translateX(-100%); } 55%, 100% { transform: translateX(350%); } }
+  @keyframes kPip { 0% { transform: translateX(-110%); } 22%, 100% { transform: translateX(110%); } }
+  .kmeter i.fill::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 30%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.5), transparent); animation: kSweep 4s ease-in-out infinite; }
+  .kmeter b.ok::after, .kmeter b.warn::after, .kmeter b.bad::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent); transform: translateX(-110%); animation: kPip 4s ease-in-out infinite; }
+  .kmeter b:nth-child(2)::after { animation-delay: 0.09s; }
+  .kmeter b:nth-child(3)::after { animation-delay: 0.18s; }
+  .kmeter b:nth-child(4)::after { animation-delay: 0.27s; }
+  .kmeter b:nth-child(5)::after { animation-delay: 0.36s; }
+  .kmeter b:nth-child(6)::after { animation-delay: 0.45s; }
+  .kmeter b:nth-child(7)::after { animation-delay: 0.54s; }
+  .kmeter b:nth-child(8)::after { animation-delay: 0.63s; }
+  .kmeter b:nth-child(9)::after { animation-delay: 0.72s; }
+  .kmeter b:nth-child(10)::after { animation-delay: 0.81s; }
+  .kmeter b:nth-child(11)::after { animation-delay: 0.90s; }
+  .kmeter b:nth-child(12)::after { animation-delay: 0.99s; }
+  .kmeter b:nth-child(13)::after { animation-delay: 1.08s; }
+  .kmeter b:nth-child(14)::after { animation-delay: 1.17s; }
+  .kmeter b:nth-child(15)::after { animation-delay: 1.26s; }
+  .kmeter b:nth-child(16)::after { animation-delay: 1.35s; }
+  @media (prefers-reduced-motion: reduce) { .kmeter i.fill::after, .kmeter b::after { display: none; } }
+  /* 线体卡: 左侧状态色条(绿=达标 / 琥珀=接近 / 红=落后; 未开班无色条) */
+  .line-card.rail-ok { box-shadow: inset 3px 0 0 0 var(--ok); }
+  .line-card.rail-warn { box-shadow: inset 3px 0 0 0 var(--warn); background: linear-gradient(rgba(245,165,36,.06), rgba(245,165,36,.06)) var(--card); }
+  .line-card.rail-bad { box-shadow: inset 3px 0 0 0 var(--bad); background: linear-gradient(rgba(240,72,72,.08), rgba(240,72,72,.08)) var(--card); }
+  .line-card.idle { background: #0e1726; border-color: rgba(120,160,220,.06); }
+  .lc-name { font-size: 15px; }
+  .lc-status { box-shadow: none; }
+  .lc-rate { font-family: var(--num); font-size: 21px; font-weight: 700; letter-spacing: 0; min-width: 0; padding: 3px 10px 2px; border-radius: 8px; }
+  .lc-rate.rate-ok { color: #3fe0a4; background: rgba(34,197,139,.16); }
+  .lc-rate.rate-warn { color: #ffc15a; background: rgba(245,165,36,.16); }
+  .lc-rate.rate-bad { color: #ff7a7a; background: rgba(240,72,72,.17); }
+  .line-card.idle .lc-rate { background: none; padding-right: 2px; }
+  .lc-mid b { font-family: var(--num); font-size: 14px; font-weight: 600; }
+  .lc-mid .lc-uph b { font-family: var(--num); }
+  /* 进度条: 纯色, 90% 刻度 = 达标线 */
+  .bar { box-shadow: none; background: rgba(150,170,205,.10); }
+  .bar.hasplan { background: rgba(240,72,72,.40); }
+  .bar i { background: #3d86f7; box-shadow: none; }
+  .bar i::after { display: none; }
+  .bar .p90 { position: absolute; left: 90%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(4,9,18,.75); z-index: 2; }
+  .line-card.idle .bar .p90 { display: none; }
+  @media (hover:hover){
+    .line-card:hover, .trend-card:hover, .hc-card:hover { background: #16223a; box-shadow: none; }
+    .line-card.rail-ok:hover { box-shadow: inset 3px 0 0 0 var(--ok); }
+    .line-card.rail-warn:hover { box-shadow: inset 3px 0 0 0 var(--warn); }
+    .line-card.rail-bad:hover { box-shadow: inset 3px 0 0 0 var(--bad); }
+  }
 </style>
 </head>
 <body>
@@ -444,10 +517,10 @@
   <div class="stall-banner" id="stallBanner">⚠️ <span id="stallTxt"></span></div>
 
   <div class="kpis">
-    <div class="kpi"><div class="lb" id="kpiEffLb">Avg Eff</div><div class="val" id="kpiEff">-</div><div class="sub" id="kpiEffSub">main lines · plan-wtd</div></div>
-    <div class="kpi"><div class="lb" id="kpiHitLb">Lines ≥90%</div><div class="val" id="kpiHit">-</div><div class="sub" id="kpiHitSub">hit x/8</div></div>
-    <div class="kpi"><div class="lb" id="kpiFinalLb">Final Qty</div><div class="val blue" id="kpiFinal">-</div><div class="sub" id="kpiFinalSub">Final A-D total</div></div>
-    <div class="kpi"><div class="lb" id="kpiMotorLb">Motor Qty</div><div class="val orange" id="kpiMotor">-</div><div class="sub" id="kpiMotorSub">Motor H/S/F/WL total</div></div>
+    <div class="kpi"><div class="lb" id="kpiEffLb">Avg Eff</div><div class="kv"><div class="val" id="kpiEff">-</div><span class="kden" id="kpiEffDen"></span></div><div class="kmeter" id="kpiEffMeter"></div><div class="sub" id="kpiEffSub">main lines · plan-wtd</div></div>
+    <div class="kpi"><div class="lb" id="kpiHitLb">Lines ≥90%</div><div class="kv"><div class="val" id="kpiHit">-</div><span class="kden" id="kpiHitDen"></span></div><div class="kmeter" id="kpiHitMeter"></div><div class="sub" id="kpiHitSub">hit x/8</div></div>
+    <div class="kpi"><div class="lb" id="kpiFinalLb">Final Qty</div><div class="kv"><div class="val blue" id="kpiFinal">-</div><span class="kden" id="kpiFinalDen"></span></div><div class="kmeter" id="kpiFinalMeter"></div><div class="sub" id="kpiFinalSub">Final A-D total</div></div>
+    <div class="kpi"><div class="lb" id="kpiMotorLb">Motor Qty</div><div class="kv"><div class="val orange" id="kpiMotor">-</div><span class="kden" id="kpiMotorDen"></span></div><div class="kmeter" id="kpiMotorMeter"></div><div class="sub" id="kpiMotorSub">Motor H/S/F/WL total</div></div>
   </div>
 
   <div class="sec">
@@ -892,6 +965,16 @@
 
   // ★ 2026-09-04: KPI 跟随车间 — wsMode=true(选中车间)时, Eff/Hit 用该车间线体计算,
   //   Final/Motor 卡切换为「车间累计产出」+「车间计划量」口径(与 pc 端 renderKPIs 同步)
+  // ★ 2026-11-16 v10(同电脑端): KPI 状态条 — 分段=每条线一格 / 连续=实际÷计划, 90% 处刻度
+  function kLvl(e){ return e>=90 ? "ok" : (e>=70 ? "warn" : "bad"); }
+  function kMeter(id, kind, html){ var el = $(id); if (!el) return; el.className = "kmeter " + kind; if (el.innerHTML !== html) el.innerHTML = html; }
+  function kBar(pct, lvl){ return (pct > 0 ? '<i class="fill ' + lvl + '" style="width:' + Math.min(100, pct).toFixed(1) + '%"></i>' : "") + '<i class="tick"></i>'; }
+  function kOut(id, out, plan){
+    $(id).textContent = out ? fmt(out) : "-";
+    $(id + "Den").textContent = out && plan ? "/" + fmt(plan) : "";
+    var pct = plan > 0 ? out / plan * 100 : 0;
+    kMeter(id + "Meter", "bar", kBar(pct, kLvl(pct)));
+  }
   function renderKpis(view, all, wsMode){
     view = view || [];
     // ★ 改动B: PRO2 只算 Final 成品线(Rotor 前道整组排除) — 其它车间全部线体
@@ -904,12 +987,19 @@
       if (p>0 && !isNaN(e)){ wEff += e*p; wPlan += p; }
     });
     var avg = wPlan>0 ? (wEff/wPlan) : NaN;
-    $("kpiEff").textContent = isNaN(avg) ? "-" : avg.toFixed(1)+"%";
+    $("kpiEff").textContent = isNaN(avg) ? "-" : avg.toFixed(1);
+    $("kpiEffDen").textContent = isNaN(avg) ? "" : "%";
+    kMeter("kpiEffMeter", "bar", kBar(avg, kLvl(avg)));
     $("kpiEff").className = "val " + (isNaN(avg) ? "" : (avg>=90?"green":(avg>=70?"orange":"red")));
     $("kpiEffSub").textContent = wsMode ? T("车间线体·计划量加权(排除停线)","ws lines · plan-wtd (excl. stopped)") : T("主要线体·计划量加权(排除停线)","main lines · plan-wtd (excl. stopped)");
     var eligRun = elig.filter(function(l){ var s=String(l.status||"").toUpperCase(); return s.indexOf("RUN")>=0; });
     var hitNum = eligRun.filter(function(l){ return Number(l.eff)>=90; }).length;
-    $("kpiHit").textContent = hitNum + "/" + eligRun.length;
+    $("kpiHit").textContent = eligRun.length ? hitNum : "-";
+    $("kpiHitDen").textContent = eligRun.length ? "/" + eligRun.length : "";
+    // 分段条: 每条在产线一格, 按达成率高→低, 绿/琥珀/红比例一眼可见
+    var effSorted = eligRun.slice().sort(function(a,b){ return (Number(b.eff)||0)-(Number(a.eff)||0); });
+    if (effSorted.length && effSorted.length <= 16) kMeter("kpiHitMeter", "seg", effSorted.map(function(l){ return '<b class="' + kLvl(Number(l.eff)||0) + '"></b>'; }).join(""));
+    else kMeter("kpiHitMeter", "bar", effSorted.length ? '<i class="fill ok" style="width:' + (hitNum/effSorted.length*100).toFixed(1) + '%"></i>' : "");
     $("kpiHit").className = "val " + (hitNum>=Math.ceil(eligRun.length*0.6)?"green":(hitNum>=Math.ceil(eligRun.length*0.4)?"orange":"red"));
     // ★ 2026-09-04: 车间模式下副标题显示命中 n/车间线体 n (默认=命中线体名)
     var hitNames = eligRun.filter(function(l){ return Number(l.eff)>=90; }).map(function(l){ return shortName(l.name); }).join((lang==="zh")?"、":", ");
@@ -922,21 +1012,23 @@
       $("kpiFinalSub").textContent = T((wsSel==="PRO2R"?"Final 线 · 今日累计":"全部线体 · 今日累计"),"today cum");
       $("kpiMotorLb").textContent = T("车间计划量","WS Plan");
       $("kpiMotorSub").textContent = T((wsSel==="PRO2R"?"Final 线 · 今日计划":"全部线体 · 今日计划"),"today plan");
-      $("kpiFinal").textContent = cumSum ? fmt(cumSum) : "-";
+      kOut("kpiFinal", cumSum, planSum);
       $("kpiMotor").textContent = planSum ? fmt(planSum) : "-";
+      $("kpiMotorDen").textContent = "";
+      kMeter("kpiMotorMeter", "none", "");
     } else {
-      var fin = 0, mot = 0;
+      var fin = 0, mot = 0, finP = 0, motP = 0;
       view.forEach(function(l){
-        var n = normName(l.name), v = Number(l.actual)||0;
-        if (n.indexOf("final")===0) fin += v;
-        if (n.indexOf("motor")===0) mot += v;
+        var n = normName(l.name), v = Number(l.actual)||0, pl = v > 0 ? (Number(l.plan)||0) : 0;
+        if (n.indexOf("final")===0){ fin += v; finP += pl; }
+        if (n.indexOf("motor")===0){ mot += v; motP += pl; }
       });
       $("kpiFinalLb").textContent = T("Final 产量","Final Qty");
       $("kpiFinalSub").textContent = T("Final A-D 合计","Final A-D total");
       $("kpiMotorLb").textContent = T("Motor 产量","Motor Qty");
       $("kpiMotorSub").textContent = T("Motor H/S/F/WL 合计","Motor H/S/F/WL total");
-      $("kpiFinal").textContent = fmt(fin);
-      $("kpiMotor").textContent = fmt(mot);
+      kOut("kpiFinal", fin, finP);
+      kOut("kpiMotor", mot, motP);
     }
     /* taste 打磨: 数值刷新时轻闪(transform/opacity, 不动布局) */
     ["kpiEff","kpiHit","kpiFinal","kpiMotor"].forEach(function(id){
@@ -979,7 +1071,8 @@
       else if (st.indexOf("IDLE")>=0){ stCls="st-idle"; stTxt = tr("待机","IDLE"); }
       var cbHtml = isNaN(cb) ? "-" : ((cb<0?"":"+") + fmt(cb));
       var cbCls = isNaN(cb) ? "" : (cb<0?"neg":"pos");
-      return '<div class="line-card' + (idle ? ' idle' : '') + '" data-line="'+esc(l.name)+'">'
+      var rail = idle || isNaN(e) ? "" : (" rail-" + barCls);
+      return '<div class="line-card' + (idle ? ' idle' : '') + rail + '" data-line="'+esc(l.name)+'">'
         + '<div class="lc-top"><div class="lc-name">' + esc(shortName(l.name)) + '</div>'
         + '<span class="lc-status ' + stCls + '">' + stTxt + '</span>'
         + '<div class="lc-rate ' + (idle ? '' : rc) + '">' + (idle||isNaN(e)?"—":e.toFixed(1)+"%") + '</div></div>'
@@ -987,7 +1080,7 @@
         + '<span>' + T("计划","Plan") + ' <b>' + fmt(p) + '</b></span>'
         + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span>'
         + '<span class="lc-uph">UPH <b>' + (idle ? '—' : uphTxt(l, new Date())) + '</b></span></div>'
-        + '<div class="bar' + (p>0 && !idle && !(e>=90) ? ' hasplan' : '') + '"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
+        + '<div class="bar' + (p>0 && !idle && !(e>=90) ? ' hasplan' : '') + '"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i><span class="p90"></span></div>'
         + '</div>';
     }
     if (x1 && x2){

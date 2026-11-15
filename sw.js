@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-v13'; // 2026-11-15 v9 与电脑端同规则: 未开班置灰 + 去发光
+var CACHE = 'pdtiii-mobile-v14'; // 2026-11-16 v10 同电脑端: 扁平 + KPI 状态条 + 卡片状态色条
 var CORE = [
   './',
   './index.html',
