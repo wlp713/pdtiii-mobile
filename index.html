@@ -413,6 +413,18 @@
   .hc-card .hc-sub, #hourlyHint { display:none; }
   .hc-card.idle { opacity:.55; }
   .hc-card svg { display:block; width:100%; height:auto; margin-top:2px; }
+  /* ═══ v9 设计规范层(2026-11-15, 与电脑端同一套规则): 去发光 · 总量白色 · 未开班置灰 · 红色只给欠产 ═══ */
+  .kpi .val, .kpi .val.green, .kpi .val.red, .kpi .val.orange, .kpi .val.blue { text-shadow:none; }
+  #kpiFinal, #kpiMotor { color: var(--white); }
+  .kpi .lb { font-size:12px; color: var(--gray); }
+  .line-card.idle { background: transparent; border-color: rgba(255,255,255,.05); }
+  .line-card.idle .lc-name { color: #8a94a5; }
+  .line-card.idle .lc-mid, .line-card.idle .lc-mid b, .line-card.idle .lc-mid .cb, .line-card.idle .lc-uph, .line-card.idle .lc-uph b { color: #6b7585; }
+  .line-card.idle .lc-rate { color: #6b7585; }
+  .line-card.idle .bar { background: rgba(120,135,160,.12); box-shadow:none; }
+  .line-card.idle .bar i { display:none; }
+  .lc-rate { text-shadow:none; }
+  .hc-card.idle .hc-name .dot { background: var(--gray-dim); box-shadow:none; }
 </style>
 </head>
 <body>
@@ -432,37 +444,37 @@
   <div class="stall-banner" id="stallBanner">⚠️ <span id="stallTxt"></span></div>
 
   <div class="kpis">
-    <div class="kpi"><div class="lb" id="kpiEffLb">⚡ Avg Eff</div><div class="val" id="kpiEff">-</div><div class="sub" id="kpiEffSub">main lines · plan-wtd</div></div>
-    <div class="kpi"><div class="lb" id="kpiHitLb">🏆 Lines ≥90%</div><div class="val" id="kpiHit">-</div><div class="sub" id="kpiHitSub">hit x/8</div></div>
-    <div class="kpi"><div class="lb" id="kpiFinalLb">🔵 Final Qty</div><div class="val blue" id="kpiFinal">-</div><div class="sub" id="kpiFinalSub">Final A-D total</div></div>
-    <div class="kpi"><div class="lb" id="kpiMotorLb">🟠 Motor Qty</div><div class="val orange" id="kpiMotor">-</div><div class="sub" id="kpiMotorSub">Motor H/S/F/WL total</div></div>
+    <div class="kpi"><div class="lb" id="kpiEffLb">Avg Eff</div><div class="val" id="kpiEff">-</div><div class="sub" id="kpiEffSub">main lines · plan-wtd</div></div>
+    <div class="kpi"><div class="lb" id="kpiHitLb">Lines ≥90%</div><div class="val" id="kpiHit">-</div><div class="sub" id="kpiHitSub">hit x/8</div></div>
+    <div class="kpi"><div class="lb" id="kpiFinalLb">Final Qty</div><div class="val blue" id="kpiFinal">-</div><div class="sub" id="kpiFinalSub">Final A-D total</div></div>
+    <div class="kpi"><div class="lb" id="kpiMotorLb">Motor Qty</div><div class="val orange" id="kpiMotor">-</div><div class="sub" id="kpiMotorSub">Motor H/S/F/WL total</div></div>
   </div>
 
   <div class="sec">
-    <div class="sec-h" id="secHMain">🏭 Lines <span class="tag" id="wsSelTag"></span></div>
+    <div class="sec-h" id="secHMain">Lines <span class="tag" id="wsSelTag"></span></div>
     <div class="chips" id="wsChips"></div>
     <div id="mainLines"></div>
   </div>
 
   <div class="sec" id="probSec" style="display:none">
-    <div class="sec-h" id="secHProb">🚨 Miss Reasons · Top Issues <span class="tag" id="probSrc">-</span></div>
+    <div class="sec-h" id="secHProb">Miss Reasons · Top Issues <span class="tag" id="probSrc">-</span></div>
     <div id="probBody"></div>
   </div>
 
   <div class="sec" id="fhSec" style="display:none">
-    <div class="sec-h" id="secHFh">⏰ 1st-Hour Target (8-9)</div>
+    <div class="sec-h" id="secHFh">1st-Hour Target (8-9)</div>
     <div id="fhBody"></div>
   </div>
 
   <div class="sec" id="hourlySec" style="display:none">
-    <div class="sec-h" id="secHHourly">📊 Hourly Output <span class="tag" id="hourlyTag">-</span></div>
+    <div class="sec-h" id="secHHourly">Hourly Output <span class="tag" id="hourlyTag">-</span></div>
     <div class="hc-legend" id="hourlyLegend"></div>
     <div class="hc-grid" id="hourlyGrid"></div>
     <div class="hc-hint" id="hourlyHint"></div>
   </div>
 
   <div class="sec">
-    <div class="sec-h" id="secHTrend">📈 Rate Trend <span class="tag" id="trendTag">last 10 workdays</span></div>
+    <div class="sec-h" id="secHTrend">Rate Trend <span class="tag" id="trendTag">last 10 workdays</span></div>
     <div class="chips" id="trendChips"></div>
     <div class="chart-box"><div id="trendChart"></div></div>
   </div>
@@ -500,7 +512,7 @@
       <div class="ld-stat"><div class="lb" id="ldStatDiffLb">Diff</div><div class="val" id="ldStatDiff">-</div><div class="sub" id="ldStatDiffSub">-</div></div>
     </div>
     <div class="sec">
-      <div class="sec-h">👥 <span id="ldUpphEyebrow">UPPH 人效</span> <span class="tag" id="ldUpphTag">UPPH</span></div>
+      <div class="sec-h"><span id="ldUpphEyebrow">UPPH 人效</span> <span class="tag" id="ldUpphTag">UPPH</span></div>
       <div class="ld-stats">
         <div class="ld-stat"><div class="lb" id="ldUpphRateLb">UPPH</div><div class="val blue" id="ldUpphRate">-</div><div class="sub" id="ldUpphRateSub">-</div></div>
         <div class="ld-stat"><div class="lb" id="ldUphLb">达成率</div><div class="val" id="ldUph">-</div><div class="sub" id="ldUphSub">-</div></div>
@@ -517,11 +529,11 @@
       <div class="ld-seg-grid" id="ldSegGrid"></div>
     </div>
     <div class="sec">
-      <div class="sec-h" id="ldSecHx">📈 <span id="ldTrendEyebrow">Rate trend</span> <span class="tag" id="ldTrendTag">last 10 workdays</span></div>
+      <div class="sec-h" id="ldSecHx"><span id="ldTrendEyebrow">Rate trend</span> <span class="tag" id="ldTrendTag">last 10 workdays</span></div>
       <div class="chart-box"><div id="ldTrendChart"></div></div>
     </div>
     <div class="sec">
-      <div class="sec-h" id="ldFhHx">⏰ <span id="ldFhEyebrow">First-hour trend</span> <span class="tag" id="ldFhTag">day</span></div>
+      <div class="sec-h" id="ldFhHx"><span id="ldFhEyebrow">First-hour trend</span> <span class="tag" id="ldFhTag">day</span></div>
       <div class="chart-box"><div id="ldFhChart"></div></div>
     </div>
   </div>
@@ -557,8 +569,8 @@
     ,"全天":"ตลอดวัน", "暂无达成线体":"ไม่มีไลน์ที่สำเร็จ", "第":"ตอนที่ ", "停滞线体: ":"ไลน์ที่หยุดชะงัก: ",
     "连接中…":"กำลังเชื่อมต่อ…", "达成 x/8":"สำเร็จ x/8", "AI分组":"AI กลุ่ม", "共":"", "台":" ชิ้น", "时段":"ช่วงเวลา",
     "主要线体·计划量加权":"ไลน์หลัก · ถ่วงน้ำหนักตามแผน", "车间线体·计划量加权":"ไลน์เวิร์กช็อป · ถ่วงน้ำหนักตามแผน",
-    "🔵 Final 产量":"🔵 ผลผลิต Final", "🟠 Motor 产量":"🟠 ผลผลิต Motor",
-    "🔵 车间累计产出":"🔵 ผลผลิตรวมเวิร์กช็อป", "🟠 车间计划量":"🟠 แผนรวมเวิร์กช็อป", " 进行中":" กำลังทำงาน"
+    "Final 产量":"ผลผลิต Final", "Motor 产量":"ผลผลิต Motor",
+    "车间累计产出":"ผลผลิตรวมเวิร์กช็อป", "车间计划量":"แผนรวมเวิร์กช็อป", " 进行中":" กำลังทำงาน"
   };
   function thT(zhTxt){ return TH[zhTxt] || zhTxt; }
   function tr(zhTxt, enTxt){
@@ -744,19 +756,19 @@
     $("langBtn").textContent = LANG_NEXT[lang] || "EN";
     if (connOk === null) $("connTxt").textContent = tr("连接中…","connecting…"); else setConn(connOk);
     $("kpiHitSub").textContent = tr("达成 x/8","hit x/8");
-    $("kpiEffLb").textContent = "⚡ " + tr("平均效率","Avg Eff");
+    $("kpiEffLb").textContent = tr("平均效率","Avg Eff");
     $("kpiEffSub").textContent = tr("主要线体·计划量加权","main lines · plan-wtd");
-    $("kpiHitLb").textContent = "🏆 " + tr("达成线体 ≥90%","Lines ≥90%");
-    $("kpiFinalLb").textContent = "🔵 " + tr("Final 产量","Final Qty");
+    $("kpiHitLb").textContent = tr("达成线体 ≥90%","Lines ≥90%");
+    $("kpiFinalLb").textContent = tr("Final 产量","Final Qty");
     $("kpiFinalSub").textContent = tr("Final A-D 合计","Final A-D total");
-    $("kpiMotorLb").textContent = "🟠 " + tr("Motor 产量","Motor Qty");
+    $("kpiMotorLb").textContent = tr("Motor 产量","Motor Qty");
     $("kpiMotorSub").textContent = tr("Motor H/S/F/WL 合计","Motor H/S/F/WL total");
     updSecHMain();
-    $("secHProb").innerHTML = (lang==="th"?tr("未达成原因 · 主要问题点","🚨 Miss Reasons · Top Issues"):(zh?"🚨 未达成原因 · 主要问题点":"🚨 Miss Reasons · Top Issues")) + ' <span class="tag" id="probSrc">-</span>';
-    $("secHFh").textContent = (lang==="th"?tr("首小时达成 (8-9点)","⏰ 1st-Hour Target (8-9)"):(zh?"⏰ 首小时达成 (8-9点)":"⏰ 1st-Hour Target (8-9)"));
-    $("secHTrend").innerHTML = (lang==="th"?tr("达成率趋势","📈 Rate Trend"):(zh?"📈 达成率趋势":"📈 Rate Trend")) + ' <span class="tag" id="trendTag">' + tr("近10个工作日","last 10 workdays") + '</span>';
+    $("secHProb").innerHTML = (lang==="th"?tr("未达成原因 · 主要问题点","Miss Reasons · Top Issues"):(zh?"未达成原因 · 主要问题点":"Miss Reasons · Top Issues")) + ' <span class="tag" id="probSrc">-</span>';
+    $("secHFh").textContent = (lang==="th"?tr("首小时达成 (8-9点)","1st-Hour Target (8-9)"):(zh?"首小时达成 (8-9点)":"1st-Hour Target (8-9)"));
+    $("secHTrend").innerHTML = (lang==="th"?tr("达成率趋势","Rate Trend"):(zh?"达成率趋势":"Rate Trend")) + ' <span class="tag" id="trendTag">' + tr("近10个工作日","last 10 workdays") + '</span>';
     $("trendTag").textContent = tr("近10个工作日","last 10 workdays");
-    $("secHHourly").innerHTML = (lang==="th"?tr("小时产出","📊 Hourly Output"):(zh?"📊 小时产出":"📊 Hourly Output")) + ' <span class="tag" id="hourlyTag">-</span>';
+    $("secHHourly").innerHTML = (lang==="th"?tr("小时产出","Hourly Output"):(zh?"小时产出":"Hourly Output")) + ' <span class="tag" id="hourlyTag">-</span>';
     var rt = $("refreshTxt"); if (rt) rt.textContent = tr("手动刷新","Refresh");
     $("footNote").textContent = tr("手机版 · 数据每 60 秒自动刷新","mobile · auto refresh every 60s");
     document.title = tr("生产实时看板 · 手机版","Production Board · Mobile");
@@ -850,6 +862,7 @@
     updSecHMain();
   }
   function updSecHMain(){
+    var _sh = $("secHMain"); if (_sh && _sh.firstChild && _sh.firstChild.nodeType === 3) _sh.firstChild.nodeValue = tr("线体","Lines") + " "; // 2026-11-15: 标题跟随语言(原固定英文)
     // 标题静态已由 HTML 给出, tag 动态显示当前范围
     var tag = $("wsSelTag");
     if (!tag) return;
@@ -905,9 +918,9 @@
       // 车间模式: Final/Motor 卡 → 车间累计产出 + 车间计划量 (★ B: 仅 Final 且 ★ C: 非停线)
       var cumSum = elig.reduce(function(s,l){ return s+(Number(l.cum)||0); }, 0);
       var planSum = elig.reduce(function(s,l){ return s+(Number(l.plan)||0); }, 0);
-      $("kpiFinalLb").textContent = T("🔵 车间累计产出","🔵 WS Output");
+      $("kpiFinalLb").textContent = T("车间累计产出","WS Output");
       $("kpiFinalSub").textContent = T((wsSel==="PRO2R"?"Final 线 · 今日累计":"全部线体 · 今日累计"),"today cum");
-      $("kpiMotorLb").textContent = T("🟠 车间计划量","🟠 WS Plan");
+      $("kpiMotorLb").textContent = T("车间计划量","WS Plan");
       $("kpiMotorSub").textContent = T((wsSel==="PRO2R"?"Final 线 · 今日计划":"全部线体 · 今日计划"),"today plan");
       $("kpiFinal").textContent = cumSum ? fmt(cumSum) : "-";
       $("kpiMotor").textContent = planSum ? fmt(planSum) : "-";
@@ -918,9 +931,9 @@
         if (n.indexOf("final")===0) fin += v;
         if (n.indexOf("motor")===0) mot += v;
       });
-      $("kpiFinalLb").textContent = T("🔵 Final 产量","🔵 Final Qty");
+      $("kpiFinalLb").textContent = T("Final 产量","Final Qty");
       $("kpiFinalSub").textContent = T("Final A-D 合计","Final A-D total");
-      $("kpiMotorLb").textContent = T("🟠 Motor 产量","🟠 Motor Qty");
+      $("kpiMotorLb").textContent = T("Motor 产量","Motor Qty");
       $("kpiMotorSub").textContent = T("Motor H/S/F/WL 合计","Motor H/S/F/WL total");
       $("kpiFinal").textContent = fmt(fin);
       $("kpiMotor").textContent = fmt(mot);
@@ -956,22 +969,25 @@
       var rc = rateCls(e);
       var pct = p>0 ? Math.min(100, Math.max(0, r/p*100)) : 0;
       var barCls = e>=90?"ok":(e>=70?"warn":"bad");
+      // ★ 2026-11-15 v9(同电脑端): 本班 0 产出且非停机/残留 = 未开班 → 灰卡、不标红、状态写「未开班」
+      var idle = !(r > 0) && !l.carryOver && !l.stalled && String(l.status||"").toUpperCase().indexOf("STOP") < 0;
       var st = String(l.status||"").toUpperCase();
       var stCls = "st-idle", stTxt = l.status || "-";
-      if (st.indexOf("RUN")>=0){ stCls="st-run"; stTxt = tr("运行","RUN"); }
+      if (idle){ stCls="st-idle"; stTxt = tr("未开班","NOT STARTED"); }
+      else if (st.indexOf("RUN")>=0){ stCls="st-run"; stTxt = tr("运行","RUN"); }
       else if (st.indexOf("STOP")>=0 || st.indexOf("DOWN")>=0){ stCls="st-stop"; stTxt = tr("停止","STOP"); }
       else if (st.indexOf("IDLE")>=0){ stCls="st-idle"; stTxt = tr("待机","IDLE"); }
       var cbHtml = isNaN(cb) ? "-" : ((cb<0?"":"+") + fmt(cb));
       var cbCls = isNaN(cb) ? "" : (cb<0?"neg":"pos");
-      return '<div class="line-card" data-line="'+esc(l.name)+'">'
+      return '<div class="line-card' + (idle ? ' idle' : '') + '" data-line="'+esc(l.name)+'">'
         + '<div class="lc-top"><div class="lc-name">' + esc(shortName(l.name)) + '</div>'
         + '<span class="lc-status ' + stCls + '">' + stTxt + '</span>'
-        + '<div class="lc-rate ' + rc + '">' + (isNaN(e)?"-":e.toFixed(1)+"%") + '</div></div>'
+        + '<div class="lc-rate ' + (idle ? '' : rc) + '">' + (idle||isNaN(e)?"—":e.toFixed(1)+"%") + '</div></div>'
         + '<div class="lc-mid"><span>' + T("实际","Act") + ' <b>' + fmt(r) + '</b></span>'
         + '<span>' + T("计划","Plan") + ' <b>' + fmt(p) + '</b></span>'
         + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span>'
-        + '<span class="lc-uph">UPH <b>' + uphTxt(l, new Date()) + '</b></span></div>'
-        + '<div class="bar' + (p>0 ? ' hasplan' : '') + '"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
+        + '<span class="lc-uph">UPH <b>' + (idle ? '—' : uphTxt(l, new Date())) + '</b></span></div>'
+        + '<div class="bar' + (p>0 && !idle && !(e>=90) ? ' hasplan' : '') + '"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
         + '</div>';
     }
     if (x1 && x2){
@@ -1663,14 +1679,14 @@
       if (a > p) s += '<rect x="'+xa+'" y="'+top.toFixed(1)+'" width="'+bw+'" height="'+(aH-pH).toFixed(1)+'" rx="3" fill="#3fb950"/>';
       // 计划柱
       s += '<rect x="'+xp+'" y="'+top.toFixed(1)+'" width="'+bw+'" height="'+h.toFixed(1)+'" rx="3" fill="rgba(255,255,255,.04)"/>';
-      if (pH > 0) s += '<rect x="'+xp+'" y="'+(y-pH).toFixed(1)+'" width="'+bw+'" height="'+pH.toFixed(1)+'" rx="3" fill="#b8923f"/>';
-      if (seg.live) s += '<rect x="'+(xa-2)+'" y="'+(top-2).toFixed(1)+'" width="'+(bw*2+SP+4)+'" height="'+(h+4).toFixed(1)+'" rx="4" fill="none" stroke="#58a6ff" stroke-width="2"/>';
+      if (pH > 0) s += '<rect x="'+xp+'" y="'+(y-pH).toFixed(1)+'" width="'+bw+'" height="'+pH.toFixed(1)+'" rx="3" fill="'+(zero ? 'rgba(184,146,63,.3)' : '#b8923f')+'"/>'; // v9: 未开班调暗
+      if (seg.live && !zero) s += '<rect x="'+(xa-2)+'" y="'+(top-2).toFixed(1)+'" width="'+(bw*2+SP+4)+'" height="'+(h+4).toFixed(1)+'" rx="4" fill="none" stroke="#58a6ff" stroke-width="2"/>';
       // 数据标签
       if (h >= 11 && (a > 0 || p > 0)){
         var f = Math.min(fBase, h*0.7);
         if (aH >= f+4) s += txt(Math.round(a), xa+bw/2, y-Math.min(aH,h)/2, bw-3, f, "#fff");
         else s += txt(Math.round(a), xa+bw/2, top+h/2, bw-3, f, zero ? "#6e7a8c" : "#ff9b94");
-        s += txt(Math.round(p), xp+bw/2, y-Math.min(Math.max(pH, f+4), h)/2, bw-3, f, "#fff8e6");
+        s += txt(Math.round(p), xp+bw/2, y-Math.min(Math.max(pH, f+4), h)/2, bw-3, f, zero ? "#8a8170" : "#fff8e6");
         if (d !== 0) s += txt((d>0?"+":"−")+Math.abs(d), xd, top+h/2, DW-2, f, zero ? "#5d6878" : (d<0 ? "#ff7b72" : "#56d364"));
       }
     });
@@ -1713,6 +1729,7 @@
       var segs = segsList[li];
       if (segs.length) any = true;
       var r = curPlan>0 ? curActual/curPlan*100 : NaN;
+      if (!(curActual > 0)) r = NaN;                            // v9: 未开班不显示 0%(红), 显示 —
       var rCls = isNaN(r) ? "none" : (r>=90?"good":(r>=70?"warn":"bad"));
       var st = String(l.status||"");
       var dot = (/run|work|开/i.test(st)) ? "run" : (/stop|停/i.test(st)) ? "stop" : "";
@@ -1720,7 +1737,7 @@
         : '<div class="chart-empty" style="padding:26px 0 20px">'+T("暂无数据","—")+'</div>';
       html += '<div class="hc-card'+(curActual>0?'':' idle')+'" data-line="'+esc(l.name)+'">'
         + '<div class="hc-head"><span class="hc-name">'+(dot?'<i class="dot '+dot+'"></i>':'')+esc(shortName(l.name))+'</span>'
-        + '<span class="hc-rat '+rCls+'">'+(isNaN(r)?'--':r.toFixed(0)+'%')+'</span></div>'
+        + '<span class="hc-rat '+rCls+'">'+(isNaN(r)?'—':r.toFixed(0)+'%')+'</span></div>'
         + segBody
         + '<div class="hc-sub">'+esc(hcSubLine(segs))+'</div>'
         + '</div>';
@@ -1753,9 +1770,10 @@
       var segs = segMap[l.name] || [];
       card.classList.toggle("idle", !(curActual > 0));
       var r = curPlan>0 ? curActual/curPlan*100 : NaN;
+      if (!(curActual > 0)) r = NaN;                            // v9: 未开班不显示 0%(红), 显示 —
       var rCls = isNaN(r) ? "none" : (r>=90?"good":(r>=70?"warn":"bad"));
       var rat = card.querySelector(".hc-rat");
-      if (rat){ rat.className = "hc-rat "+rCls; rat.textContent = isNaN(r)?'--':r.toFixed(0)+'%'; }
+      if (rat){ rat.className = "hc-rat "+rCls; rat.textContent = isNaN(r)?'—':r.toFixed(0)+'%'; }
       var sub = card.querySelector(".hc-sub");
       if (sub) sub.textContent = hcSubLine(segs);
       var body = segs.length ? hcCardSVG(segs)
