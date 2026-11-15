@@ -485,13 +485,11 @@
   .line-card.idle .lc-rate { background: none; padding-right: 2px; }
   .lc-mid b { font-family: var(--num); font-size: 14px; font-weight: 600; }
   .lc-mid .lc-uph b { font-family: var(--num); }
-  /* 进度条: 纯色, 90% 刻度 = 达标线 */
+  /* 进度条: 纯色 */
   .bar { box-shadow: none; background: rgba(150,170,205,.10); }
   .bar.hasplan { background: rgba(240,72,72,.40); }
   .bar i { background: #3d86f7; box-shadow: none; }
   .bar i::after { display: none; }
-  .bar .p90 { position: absolute; left: 90%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(4,9,18,.75); z-index: 2; }
-  .line-card.idle .bar .p90 { display: none; }
   @media (hover:hover){
     .line-card:hover, .trend-card:hover, .hc-card:hover { background: #16223a; box-shadow: none; }
     .line-card.rail-ok:hover { box-shadow: inset 3px 0 0 0 var(--ok); }
@@ -1080,7 +1078,7 @@
         + '<span>' + T("计划","Plan") + ' <b>' + fmt(p) + '</b></span>'
         + '<span>' + T("差异","Gap") + ' <b class="cb ' + cbCls + '">' + cbHtml + '</b></span>'
         + '<span class="lc-uph">UPH <b>' + (idle ? '—' : uphTxt(l, new Date())) + '</b></span></div>'
-        + '<div class="bar' + (p>0 && !idle && !(e>=90) ? ' hasplan' : '') + '"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i><span class="p90"></span></div>'
+        + '<div class="bar' + (p>0 && !idle && !(e>=90) ? ' hasplan' : '') + '"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
         + '</div>';
     }
     if (x1 && x2){
