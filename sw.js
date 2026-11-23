@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-v18'; // 2026-11-23 遮罩加默认密码
+var CACHE = 'pdtiii-mobile-v19'; // 2026-11-23 遮罩改为可选通告(知道了/只弹一次)
 var CORE = [
   './',
   './index.html',

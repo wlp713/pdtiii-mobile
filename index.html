@@ -2217,44 +2217,46 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   requestAnimationFrame(frame);
 })();
 </script>
-<!-- 2026-11-23 手机端「假关闭」：手机直接打开旧链接 → 盖一层迁移提示，引导去 DM APP。
-     不影响：电视/电脑（非手机）、#meeting 检讨会、DM APP 内嵌（iframe，window.top !== window）。底层看板照常刷新。 -->
+<!-- 2026-11-23 DM APP 通告（可选，不强制）：手机直接打开时弹一次，点「知道了」照常看看板；每台设备只弹一次（localStorage 记住）。
+     不弹：电视/电脑（非手机）、#meeting 检讨会、DM APP 内嵌（iframe，window.top !== window）。 -->
 <style>
-#dmGate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px 16px;
-  background:rgba(8,12,20,.9);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:#fff;text-align:center;
-  font-family:-apple-system,"PingFang SC","Noto Sans Thai","Microsoft YaHei",sans-serif}
+#dmGate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:rgba(8,12,20,.6);color:#fff;text-align:center;font-family:-apple-system,"PingFang SC","Noto Sans Thai","Microsoft YaHei",sans-serif}
 #dmGate[hidden]{display:none}
-#dmGate .g{max-width:340px;width:100%}
-#dmGate h2{margin:0 0 10px;font-size:22px;line-height:1.4;font-weight:700}
-#dmGate p{margin:0 0 28px;font-size:16px;line-height:1.6;opacity:.85}
-#dmGate a{display:block;padding:15px 18px;border-radius:12px;background:#2f7cf6;color:#fff;font-size:17px;font-weight:700;text-decoration:none;line-height:1.4}
+#dmGate .g{max-width:360px;width:100%;padding:28px 22px 18px;border-radius:16px;background:#141b2a;border:1px solid rgba(255,255,255,.1);box-shadow:0 20px 60px rgba(0,0,0,.5)}
+#dmGate h2{margin:0 0 8px;font-size:21px;line-height:1.4;font-weight:700}
+#dmGate p{margin:0 0 18px;font-size:15px;line-height:1.6;opacity:.8}
+#dmGate a{display:block;padding:14px 16px;border-radius:12px;background:#2f7cf6;color:#fff;font-size:16px;font-weight:700;text-decoration:none;line-height:1.4}
 #dmGate a:active{opacity:.85}
-#dmGate .pw{margin:-12px 0 24px;padding:10px;border-radius:10px;background:rgba(255,255,255,.08);font-size:16px;line-height:1.7}
-#dmGate .pw b{font-size:20px;letter-spacing:2px;color:#ffd166}
+#dmGate button{margin-top:8px;width:100%;padding:12px;border:0;border-radius:12px;background:transparent;color:rgba(255,255,255,.75);font-size:15px}
+#dmGate .pw{margin:0 0 18px;padding:10px;border-radius:10px;background:rgba(255,255,255,.08);font-size:15px;line-height:1.7}
+#dmGate .pw b{font-size:19px;letter-spacing:2px;color:#ffd166}
 </style>
 <div id="dmGate" role="dialog" aria-modal="true" aria-labelledby="dmGateT" hidden>
   <div class="g">
-    <h2 id="dmGateT">生产看板已转移至 DM APP 主页</h2>
-    <p lang="th">บอร์ดผลผลิตย้ายไปอยู่ที่หน้าแรกของแอป DM แล้ว</p>
+    <h2 id="dmGateT">建议用 DM APP 看生产看板</h2>
+    <p lang="th">แนะนำให้ดูบอร์ดผลผลิตที่หน้าแรกของแอป DM</p>
     <div class="pw">默认密码 <b>123456</b><br><span lang="th">รหัสผ่านเริ่มต้น</span> <b>123456</b></div>
-    <a href="https://dm111-e8a7d.web.app/get/" rel="noopener">打开 / 安装 DM APP<br><span lang="th">เปิด / ติดตั้งแอป DM</span></a>
+    <a href="https://dm111-e8a7d.web.app/get/" rel="noopener">打开 / 下载 DM APP<br><span lang="th">เปิด / ดาวน์โหลดแอป DM</span></a>
+    <button type="button">知道了 · รับทราบ</button>
   </div>
 </div>
 <script>
 (function () {
-  var g = document.getElementById('dmGate');
+  var K = 'dmAppNotice1', g = document.getElementById('dmGate');
   var embedded = true;
   try { embedded = window.top !== window; } catch (e) {}
   var ua = navigator.userAgent || '';
   var phone = /Android|iPhone|iPod|Mobile|HarmonyOS/i.test(ua) ||
     (window.matchMedia && matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600);
-  function upd() {
-    var on = phone && !embedded && location.hash.indexOf('#meeting') !== 0;
-    g.hidden = !on;
-    document.documentElement.style.overflow = on ? 'hidden' : '';
-  }
-  upd();
-  window.addEventListener('hashchange', upd);
+  if (!phone || embedded || location.hash.indexOf('#meeting') === 0) return;
+  try { if (localStorage.getItem(K)) return; localStorage.setItem(K, '1'); } catch (e) { return; }   // 弹出即记已看过：刷新也不再弹
+  function close() { g.hidden = true; }
+  g.hidden = false;
+  g.querySelector('button').onclick = close;
+  g.querySelector('a').addEventListener('click', close);
+  g.addEventListener('click', function (e) { if (e.target === g) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
 })();
 </script>
 </body>
