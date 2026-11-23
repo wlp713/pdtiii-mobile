@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-v16'; // 2026-11-23 手机端假关闭遮罩(引导去 DM APP)
+var CACHE = 'pdtiii-mobile-v17'; // 2026-11-23 发版自动刷新
 var CORE = [
   './',
   './index.html',

@@ -2120,6 +2120,36 @@
 
 <!-- ★ 2026-09-03 PWA: 添加到主屏幕后全屏独立运行; SW 网络优先, 不缓存 Firebase 数据/live-data.js -->
 <script>
+/* 2026-11-23 发版自动刷新(同电脑端): 每 3 分钟 + 回前台时检查线上版本, 有新部署就带 ?v= 重新加载一次。
+   版本取 Last-Modified(GitHub Pages); Cloudflare Pages 没有 → 比对 sw.js 的 CACHE 版本号(每次发版都改)。 */
+(function () {
+  var _v = null;
+  function chk() {
+    try {
+      fetch(location.pathname, { method: "HEAD", cache: "no-store" })
+        .then(function (r) {
+          if (!r.ok) return;
+          var lm = r.headers.get("last-modified");
+          if (lm) return lm;
+          return fetch("sw.js", { cache: "no-store" }).then(function (s) { return s.ok ? s.text() : ""; })
+            .then(function (t) { var m = /CACHE = '([^']+)'/.exec(t); return m && m[1]; });
+        })
+        .then(function (v) {
+          if (!v) return;
+          if (_v === null) { _v = v; return; }
+          if (v !== _v) { _v = v; location.replace(location.pathname + "?v=" + Date.now() + location.hash); }
+        })
+        .catch(function () {});
+    } catch (e) {}
+  }
+  if (location.protocol === "http:" || location.protocol === "https:") {
+    chk(); setInterval(chk, 180000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) chk(); });
+    window.addEventListener("focus", chk);
+  }
+})();
+</script>
+<script>
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('./sw.js?v=8').catch(function () {});
 }
