@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-v17'; // 2026-11-23 发版自动刷新
+var CACHE = 'pdtiii-mobile-v18'; // 2026-11-23 遮罩加默认密码
 var CORE = [
   './',
   './index.html',
