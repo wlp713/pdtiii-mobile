@@ -1,5 +1,5 @@
 /* PDTIII 手机版 Service Worker — 离线壳: 缓存页面自身, 数据仍走 Firebase 实时网络 */
-var CACHE = 'pdtiii-mobile-v20'; // 2026-11-23 通告「知道了」改成有边框的按钮
+var CACHE = 'pdtiii-mobile-v21'; // 2026-11-23 已看过同时记 cookie
 var CORE = [
   './',
   './index.html',

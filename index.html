@@ -2251,7 +2251,12 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   var phone = /Android|iPhone|iPod|Mobile|HarmonyOS/i.test(ua) ||
     (window.matchMedia && matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600);
   if (!phone || embedded || location.hash.indexOf('#meeting') === 0) return;
-  try { if (localStorage.getItem(K)) return; localStorage.setItem(K, '1'); } catch (e) { return; }   // 弹出即记已看过：刷新也不再弹
+  function seen() { try { if (localStorage.getItem(K)) return true; } catch (e) {} return document.cookie.indexOf(K + '=1') >= 0; }
+  // 本地存储可能写满/被禁 → 同时写 cookie 兜底；两处都记不住就不弹，免得每次刷新都弹
+  function mark() { try { localStorage.setItem(K, '1'); } catch (e) {} try { document.cookie = K + '=1; max-age=31536000; path=/; SameSite=Lax'; } catch (e) {} }
+  if (seen()) return;
+  mark();
+  if (!seen()) return;
   function close() { g.hidden = true; }
   g.hidden = false;
   g.querySelector('button').onclick = close;
